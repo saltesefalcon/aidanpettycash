@@ -18,6 +18,15 @@ import {
 type CashIn = { id?: string; date: any; amount: number; source?: string; note?: string };
 type Opening = { amount: number; note?: string; createdAt?: any };
 type Deposit = { id?: string; date: any; amount: number; method?: string; note?: string };
+type Audit = {
+  id?: string;
+  date: any;
+  n5: number; n10: number; n20: number; n50: number; n100: number;
+  change: number; // loose bills/coins in dollars
+  total: number;  // computed counted cash
+  note?: string;
+};
+
 
 export default function AdminPage() {
   const { storeId } = useParams<{ storeId: string }>();
@@ -54,6 +63,28 @@ export default function AdminPage() {
   const [depAmount, setDepAmount] = useState<string>("");
   const [depMethod, setDepMethod] = useState<string>("Bank");
   const [depNote, setDepNote] = useState<string>("");
+
+  // ----- Audit form -----
+const [auditDate, setAuditDate] = useState(() => {
+  const t = new Date();
+  const mm = String(t.getMonth() + 1).padStart(2, "0");
+  const dd = String(t.getDate()).padStart(2, "0");
+  return `${t.getFullYear()}-${mm}-${dd}`;
+});
+const [n5, setN5] = useState<string>("0");
+const [n10, setN10] = useState<string>("0");
+const [n20, setN20] = useState<string>("0");
+const [n50, setN50] = useState<string>("0");
+const [n100, setN100] = useState<string>("0");
+const [chg, setChg] = useState<string>("0");
+const [audits, setAudits] = useState<Audit[]>([]);
+
+// helpers + computed
+const num = (s: string) => Number.parseFloat(s || "0");
+const counted = useMemo(
+  () => num(n5)*5 + num(n10)*10 + num(n20)*20 + num(n50)*50 + num(n100)*100 + num(chg),
+  [n5, n10, n20, n50, n100, chg]
+);
 
   // ----- Data -----
   const [cashIns, setCashIns] = useState<CashIn[]>([]);
@@ -111,6 +142,52 @@ export default function AdminPage() {
     })();
   }, [storeId, month]);
 
+  // Load audits for month (client-side sort; no composite index)
+useEffect(() => {
+  if (!storeId || !month) return;
+  (async () => {
+    const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
+    const snap = await getDocs(qy);
+    const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    rows.sort(
+      (a: any, b: any) =>
+        (a.date?.toDate?.() ?? new Date(0)).getTime() -
+        (b.date?.toDate?.() ?? new Date(0)).getTime()
+    );
+    setAudits(rows as Audit[]);
+  })();
+}, [storeId, month]);
+
+async function saveAudit(e: React.FormEvent) {
+  e.preventDefault();
+  if (!storeId) return;
+  const when = Timestamp.fromDate(new Date(`${auditDate}T00:00:00`));
+  const payload = {
+    date: when,
+    n5: num(n5), n10: num(n10), n20: num(n20), n50: num(n50), n100: num(n100),
+    change: num(chg),
+    total: Number(counted.toFixed(2)),
+    month,
+    createdAt: Timestamp.now(),
+  };
+  await addDoc(collection(db, "stores", storeId, "audits"), payload);
+
+  // reset quick fields
+  setN5("0"); setN10("0"); setN20("0"); setN50("0"); setN100("0"); setChg("0");
+
+  // refresh list
+  const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
+  const snap = await getDocs(qy);
+  const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+  rows.sort(
+    (a: any, b: any) =>
+      (a.date?.toDate?.() ?? new Date(0)).getTime() -
+      (b.date?.toDate?.() ?? new Date(0)).getTime()
+  );
+  setAudits(rows as Audit[]);
+}
+
+
   // Sum entries (gross) for month
   useEffect(() => {
     if (!storeId || !month) return;
@@ -139,6 +216,8 @@ export default function AdminPage() {
     () => Number((opening + cashInSum - entriesSum).toFixed(2)),
     [opening, cashInSum, entriesSum],
   );
+
+  const variance = useMemo(() => Number((counted - closing).toFixed(2)), [counted, closing]);
 
   async function saveOpening(e: React.FormEvent) {
     e.preventDefault();
@@ -366,6 +445,89 @@ export default function AdminPage() {
           </table>
         </div>
       </section>
+
+      {/* Audit & denominations */}
+<section className="mb-8">
+  <h2 className="text-xl font-semibold mb-2">Petty cash audit &amp; denominations</h2>
+
+  <form onSubmit={saveAudit} className="grid grid-cols-7 gap-3 max-w-5xl items-end">
+    <div className="col-span-2">
+      <label className="block text-sm mb-1">Date</label>
+      <input type="date" value={auditDate} onChange={(e) => setAuditDate(e.target.value)}
+        className="border px-3 py-2 rounded w-full" required />
+    </div>
+
+    <div>
+      <label className="block text-xs mb-1">$5 count</label>
+      <input type="number" min="0" value={n5} onChange={(e) => setN5(e.target.value)}
+        className="border px-3 py-2 rounded w-full" />
+    </div>
+    <div>
+      <label className="block text-xs mb-1">$10 count</label>
+      <input type="number" min="0" value={n10} onChange={(e) => setN10(e.target.value)}
+        className="border px-3 py-2 rounded w-full" />
+    </div>
+    <div>
+      <label className="block text-xs mb-1">$20 count</label>
+      <input type="number" min="0" value={n20} onChange={(e) => setN20(e.target.value)}
+        className="border px-3 py-2 rounded w-full" />
+    </div>
+    <div>
+      <label className="block text-xs mb-1">$50 count</label>
+      <input type="number" min="0" value={n50} onChange={(e) => setN50(e.target.value)}
+        className="border px-3 py-2 rounded w-full" />
+    </div>
+    <div>
+      <label className="block text-xs mb-1">$100 count</label>
+      <input type="number" min="0" value={n100} onChange={(e) => setN100(e.target.value)}
+        className="border px-3 py-2 rounded w-full" />
+    </div>
+
+    <div className="col-span-2">
+      <label className="block text-sm mb-1">Change ($)</label>
+      <input type="number" step="0.01" min="0" value={chg} onChange={(e) => setChg(e.target.value)}
+        className="border px-3 py-2 rounded w-full" />
+    </div>
+
+    <div className="col-span-3 text-sm">
+      <div>Counted total: <strong>${counted.toFixed(2)}</strong></div>
+      <div className={variance === 0 ? "" : variance > 0 ? "text-green-700" : "text-red-700"}>
+        Variance vs projected closing: <strong>{variance >= 0 ? "+" : ""}${variance.toFixed(2)}</strong>
+      </div>
+    </div>
+
+    <div className="col-span-2">
+      <button className="border px-4 py-2 rounded">Save audit</button>
+    </div>
+  </form>
+
+  {/* Recent audits */}
+  <div className="mt-4 overflow-x-auto">
+    <table className="min-w-[560px] text-sm">
+      <thead>
+        <tr className="text-left border-b">
+          <th className="py-2 pr-4">Date</th>
+          <th className="py-2 pr-4">Counted total</th>
+          <th className="py-2 pr-4">Variance (vs closing at time)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {audits.slice(-5).map((a) => {
+          const dt = a.date?.toDate?.() ?? new Date();
+          const v = (Number(a.total || 0) - closing).toFixed(2);
+          return (
+            <tr key={a.id} className="border-b last:border-b-0">
+              <td className="py-2 pr-4">{dt.toLocaleDateString("en-CA")}</td>
+              <td className="py-2 pr-4">${Number(a.total || 0).toFixed(2)}</td>
+              <td className="py-2 pr-4">{v}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+</section>
+
 
       {/* Placeholders for next widgets */}
       <section className="opacity-70">
