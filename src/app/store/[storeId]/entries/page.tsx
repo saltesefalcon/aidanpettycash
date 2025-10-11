@@ -136,9 +136,10 @@ export default function EntriesPage() {
   return (
     <main className="min-h-screen p-6">
       <h1 className="text-2xl font-semibold mb-2">Petty Cash — Entries</h1>
-      <p className="mb-4 text-sm">
-        Store: <strong>{String(storeId)}</strong>
-      </p>
+	  <p className="mb-4 text-sm">
+  Store: <strong>{String(storeId)}</strong> ·{" "}
+  <a className="underline" href={`/store/${storeId}/admin`}>Admin</a>
+</p>
 
       {!accounts.length ? (
         <div className="mb-6 p-3 border rounded-md">
