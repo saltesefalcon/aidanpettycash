@@ -101,9 +101,12 @@ export default function EntriesPage() {
 
       // convert yyyy-mm-dd to Firestore Timestamp (local midnight)
       const when = Timestamp.fromDate(new Date(`${date}T00:00:00`));
+      // add month key "YYYY-MM" for month-based queries/rollups
+      const monthKey = date.slice(0, 7);
 
       await addDoc(collection(db, "stores", storeId, "entries"), {
         date: when,
+        month: monthKey,                   // ⬅️ new field
         vendor: vendor.trim(),
         description: description.trim(),
         amount: Number.parseFloat(amount), // gross
