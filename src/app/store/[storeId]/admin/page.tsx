@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
+import { entriesToQboCsv } from "@/lib/export/qbo";
+
 import {
   addDoc,
   setDoc,
@@ -65,17 +67,18 @@ async function downloadCsvForMonthClient() {
     fmtDate(r.date), esc(r.vendor ?? ""), esc(r.description ?? ""),
     r.type ?? "", esc(r.account ?? ""), money(r.amount), money(r.hst), money(r.net)
   ].join(","));
-  const csv = [header, ...data].join("\r\n");
+  // After you build and sort `rows`…
+const csv = entriesToQboCsv(rows, String(storeId));
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `pettycash_${storeId}_${month}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+const url = URL.createObjectURL(blob);
+const a = document.createElement("a");
+a.href = url;
+a.download = `pettycash_${storeId}_${month}.csv`;
+document.body.appendChild(a);
+a.click();
+a.remove();
+URL.revokeObjectURL(url);
 }
 
 
@@ -351,19 +354,12 @@ async function saveAudit(e: React.FormEvent) {
           <div className="mt-1 opacity-80">Deposits (tracker): <strong>${depositsSum.toFixed(2)}</strong></div>
         </div>
       </div>
-        <div className="mt-2">
-        {(() => {
-          const { from, to } = monthStartEnd(month);
-          return (
-            <div className="mt-2">
+<div className="mt-2">
   <button type="button" className="underline" onClick={downloadCsvForMonthClient}>
     Download CSV for {month}
   </button>
 </div>
 
-          );
-        })()}
-      </div>
 
       {/* Opening balance */}
       <section className="mb-8">

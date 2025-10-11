@@ -3,7 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-// ⬇️ Adjust this import if your Firestore client lives elsewhere
+// ⬇️ Adjust this import to wherever your Firestore client (db) is exported.
+// Common paths are "@/lib/firebase" or "@/firebase/client"
 import { db } from "@/lib/firebase";
 
 import {
@@ -14,7 +15,6 @@ import {
   query,
   serverTimestamp,
   Timestamp,
-  limit,
 } from "firebase/firestore";
 
 type Account = { id: string; name: string };
@@ -24,8 +24,9 @@ export default function EntriesPage() {
   const params = useParams<{ storeId: string }>();
   const storeId = params?.storeId;
 
-  // ---------- form state ----------
+  // form state
   const [date, setDate] = useState<string>(() => {
+    // default to today in YYYY-MM-DD
     const t = new Date();
     const mm = String(t.getMonth() + 1).padStart(2, "0");
     const dd = String(t.getDate()).padStart(2, "0");
@@ -38,12 +39,12 @@ export default function EntriesPage() {
   const [type, setType] = useState<"FOH" | "BOH" | "OTHER" | "TRAVEL">("FOH");
   const [account, setAccount] = useState<string>("");
 
-  // ---------- ui state ----------
+  // ui state
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ---------- accounts dropdown ----------
+  // accounts for the dropdown
   const [accounts, setAccounts] = useState<Account[]>([]);
 
   useEffect(() => {
@@ -56,16 +57,18 @@ export default function EntriesPage() {
     const unsub = onSnapshot(q, (snap) => {
       const rows: Account[] = snap.docs.map((d) => {
         const data = d.data() as any;
+        // support either {name: "..."} or plain docs where id is the visible value
         return { id: d.id, name: data?.name ?? d.id };
       });
       setAccounts(rows);
+      // select first account if none chosen
       if (!account && rows.length) setAccount(rows[0].name);
     });
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  // ---------- derived net = amount - hst ----------
+  // derived net = amount - hst
   const net = useMemo(() => {
     const a = Number.parseFloat(amount || "0");
     const h = Number.parseFloat(hst || "0");
@@ -73,7 +76,6 @@ export default function EntriesPage() {
     return Number.isFinite(n) ? n : 0;
   }, [amount, hst]);
 
-  // ---------- submit ----------
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
@@ -101,24 +103,25 @@ export default function EntriesPage() {
 
       // convert yyyy-mm-dd to Firestore Timestamp (local midnight)
       const when = Timestamp.fromDate(new Date(`${date}T00:00:00`));
-      // add month key "YYYY-MM" for month-based queries/rollups
-      const monthKey = date.slice(0, 7);
+      const month = date.slice(0, 7); // "YYYY-MM"
+      const monthStr = date.slice(0, 7); 
 
-      await addDoc(collection(db, "stores", storeId, "entries"), {
-        date: when,
-        month: monthKey,                   // ⬅️ new field
-        vendor: vendor.trim(),
-        description: description.trim(),
-        amount: Number.parseFloat(amount), // gross
-        hst: Number.parseFloat(hst),
-        net: Number.parseFloat((net as number).toFixed(2)),
-        type,
-        account, // visible name (e.g., "1050 Petty Cash")
-        createdAt: serverTimestamp(),
-      });
+    await addDoc(collection(db, "stores", storeId, "entries"), {
+      date: when,
+      vendor: vendor.trim(),
+      description: description.trim(),
+      amount: Number.parseFloat(amount), // gross
+      hst: Number.parseFloat(hst),
+      net: Number.parseFloat((net as number).toFixed(2)),
+      type,
+      account,
+      month: monthStr,                  // <-- add this
+      createdAt: serverTimestamp(),
+    });
+
 
       setMessage("Saved!");
-      // reset quick-entry fields; keep date/account/type
+      // reset the quick-entry fields but keep date/account/type
       setVendor("");
       setDescription("");
       setAmount("");
@@ -136,10 +139,9 @@ export default function EntriesPage() {
   return (
     <main className="min-h-screen p-6">
       <h1 className="text-2xl font-semibold mb-2">Petty Cash — Entries</h1>
-	  <p className="mb-4 text-sm">
-  Store: <strong>{String(storeId)}</strong> ·{" "}
-  <a className="underline" href={`/store/${storeId}/admin`}>Admin</a>
-</p>
+      <p className="mb-4 text-sm">
+        Store: <strong>{String(storeId)}</strong>
+      </p>
 
       {!accounts.length ? (
         <div className="mb-6 p-3 border rounded-md">
@@ -274,20 +276,11 @@ export default function EntriesPage() {
           {error && <span className="text-red-700">{error}</span>}
         </div>
       </form>
-
-      {/* Recent list appears under the form */}
-      <RecentEntries storeId={String(storeId)} />
-    </main>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────
-// RecentEntries component (file-scope, outside EntriesPage)
-// ──────────────────────────────────────────────────────────────
+      // --- Recent Entries (below the form) ---
 function RecentEntries({ storeId }: { storeId: string }) {
-  const [rows, setRows] = useState<Array<any>>([]);
+  const [rows, setRows] = React.useState<Array<any>>([]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!storeId) return;
     const qy = query(
       collection(db, "stores", storeId, "entries"),
@@ -295,23 +288,24 @@ function RecentEntries({ storeId }: { storeId: string }) {
       limit(25)
     );
     const unsub = onSnapshot(qy, (snap) => {
-      setRows(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+      setRows(
+        snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
+      );
     });
     return () => unsub();
   }, [storeId]);
 
   const fmtDate = (ts?: any) =>
     ts?.toDate ? ts.toDate().toLocaleDateString("en-CA") : "";
-  const money = (n: number) => (Number.isFinite(n) ? n.toFixed(2) : "0.00");
+  const money = (n: number) =>
+    Number.isFinite(n) ? n.toFixed(2) : "0.00";
 
-  if (!rows.length) {
-    return (
-      <section className="mt-8">
-        <h2 className="text-xl font-semibold mb-2">Recent entries</h2>
-        <p className="text-sm text-gray-600">No entries yet.</p>
-      </section>
-    );
-  }
+  if (!rows.length) return (
+    <section className="mt-8">
+      <h2 className="text-xl font-semibold mb-2">Recent entries</h2>
+      <p className="text-sm text-gray-600">No entries yet.</p>
+    </section>
+  );
 
   return (
     <section className="mt-8">
@@ -345,7 +339,18 @@ function RecentEntries({ storeId }: { storeId: string }) {
             ))}
           </tbody>
         </table>
+        <a
+  href={`/api/store/${storeId}/qbo-export`}
+  className="inline-block mt-6 border px-4 py-2 rounded"
+>
+  Export QBO (CSV) — scaffold
+</a>
+
       </div>
     </section>
+  );
+}
+
+    </main>
   );
 }
