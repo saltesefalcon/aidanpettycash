@@ -37,6 +37,48 @@ export default function AdminPage() {
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
   });
 
+const monthStartEnd = (ym: string) => {
+  const [y, m] = ym.split("-").map(Number);
+  const start = new Date(y, m - 1, 1);
+  const end = new Date(y, m, 0);
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+  return { from: ymd(start), to: ymd(end) };
+};
+
+async function downloadCsvForMonthClient() {
+  if (!storeId || !month) return;
+  // No index needed because we filter by the stored "month"
+  const qy = query(collection(db, "stores", storeId, "entries"), where("month", "==", month));
+  const snap = await getDocs(qy);
+  const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+  rows.sort((a:any,b:any)=>
+    (a.date?.toDate?.() ?? new Date(0)).getTime() -
+    (b.date?.toDate?.() ?? new Date(0)).getTime()
+  );
+
+  const fmtDate = (ts?: any) => ts?.toDate ? ts.toDate().toISOString().slice(0,10) : "";
+  const esc = (s: string) => `"${(s ?? "").replace(/"/g,'""')}"`;
+  const money = (n: any) => Number.isFinite(Number(n)) ? Number(n).toFixed(2) : "";
+
+  const header = ["Date","Vendor","Description","Type","Account","Gross","HST","Net"].join(",");
+  const data = rows.map(r => [
+    fmtDate(r.date), esc(r.vendor ?? ""), esc(r.description ?? ""),
+    r.type ?? "", esc(r.account ?? ""), money(r.amount), money(r.hst), money(r.net)
+  ].join(","));
+  const csv = [header, ...data].join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pettycash_${storeId}_${month}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
   // ----- Opening balance -----
   const [openingAmt, setOpeningAmt] = useState<string>("");
   const [openingNote, setOpeningNote] = useState<string>("");
@@ -308,6 +350,19 @@ async function saveAudit(e: React.FormEvent) {
           <div className="mt-1">Projected closing: <strong>${closing.toFixed(2)}</strong></div>
           <div className="mt-1 opacity-80">Deposits (tracker): <strong>${depositsSum.toFixed(2)}</strong></div>
         </div>
+      </div>
+        <div className="mt-2">
+        {(() => {
+          const { from, to } = monthStartEnd(month);
+          return (
+            <div className="mt-2">
+  <button type="button" className="underline" onClick={downloadCsvForMonthClient}>
+    Download CSV for {month}
+  </button>
+</div>
+
+          );
+        })()}
       </div>
 
       {/* Opening balance */}
