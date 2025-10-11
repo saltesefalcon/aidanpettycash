@@ -250,17 +250,20 @@ export default function EntriesPage() {
           </div>
           <div>
             <label className="block text-sm mb-1">Account</label>
-            <select
-              value={account}
-              onChange={(e) => setAccount(e.target.value)}
-              className="w-full border px-3 py-2 rounded"
-            >
-              {accounts.map((a) => (
+          <select
+            value={account}
+            onChange={(e) => setAccount(e.target.value)}
+            className="w-full border px-3 py-2 rounded"
+          >
+            {accounts
+              .filter((a) => a.name !== "1050 Petty Cash")
+              .map((a) => (
                 <option key={a.id} value={a.name}>
                   {a.name}
                 </option>
               ))}
-            </select>
+          </select>
+
           </div>
         </div>
 
