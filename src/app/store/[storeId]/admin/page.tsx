@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { entriesToQboCsv } from "@/lib/export/qbo";
 
 import {
   addDoc,
@@ -38,6 +37,9 @@ export default function AdminPage() {
     const t = new Date();
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
   });
+  const [journalNo, setJournalNo] = useState<string>("");
+  const [includeCashIns, setIncludeCashIns] = useState<boolean>(false);
+  const [cashInCreditAccount, setCashInCreditAccount] = useState<string>("1000 Bank");
 
 const monthStartEnd = (ym: string) => {
   const [y, m] = ym.split("-").map(Number);
@@ -47,41 +49,19 @@ const monthStartEnd = (ym: string) => {
   return { from: ymd(start), to: ymd(end) };
 };
 
-async function downloadCsvForMonthClient() {
-  if (!storeId || !month) return;
-  // No index needed because we filter by the stored "month"
-  const qy = query(collection(db, "stores", storeId, "entries"), where("month", "==", month));
-  const snap = await getDocs(qy);
-  const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-  rows.sort((a:any,b:any)=>
-    (a.date?.toDate?.() ?? new Date(0)).getTime() -
-    (b.date?.toDate?.() ?? new Date(0)).getTime()
-  );
-
-  const fmtDate = (ts?: any) => ts?.toDate ? ts.toDate().toISOString().slice(0,10) : "";
-  const esc = (s: string) => `"${(s ?? "").replace(/"/g,'""')}"`;
-  const money = (n: any) => Number.isFinite(Number(n)) ? Number(n).toFixed(2) : "";
-
-  const header = ["Date","Vendor","Description","Type","Account","Gross","HST","Net"].join(",");
-  const data = rows.map(r => [
-    fmtDate(r.date), esc(r.vendor ?? ""), esc(r.description ?? ""),
-    r.type ?? "", esc(r.account ?? ""), money(r.amount), money(r.hst), money(r.net)
-  ].join(","));
-  // After you build and sort `rows`…
-const csv = entriesToQboCsv(rows, String(storeId));
-
-const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-const url = URL.createObjectURL(blob);
-const a = document.createElement("a");
-a.href = url;
-a.download = `pettycash_${storeId}_${month}.csv`;
-document.body.appendChild(a);
-a.click();
-a.remove();
-URL.revokeObjectURL(url);
+function downloadCsvForMonthClient() {
+  const { from, to } = monthStartEnd(month);
+  const params = new URLSearchParams({
+    from,
+    to,
+  });
+  if (journalNo) params.set("jn", journalNo);
+  if (includeCashIns) {
+    params.set("includeCashIns", "1");
+    if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+  }
+  window.open(`/api/store/${storeId}/qbo-export?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
-
-
   // ----- Opening balance -----
   const [openingAmt, setOpeningAmt] = useState<string>("");
   const [openingNote, setOpeningNote] = useState<string>("");
