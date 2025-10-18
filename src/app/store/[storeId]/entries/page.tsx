@@ -1,359 +1,362 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-
-// ⬇️ Adjust this import to wherever your Firestore client (db) is exported.
-// Common paths are "@/lib/firebase" or "@/firebase/client"
+import React from "react";
+import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
-
 import {
   addDoc,
   collection,
-  onSnapshot,
+  getDocs,
   orderBy,
   query,
-  serverTimestamp,
+  limit,
   Timestamp,
+  onSnapshot, 
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 
-type Account = { id: string; name: string };
+type AccountDoc = { name: string };
+
+function RecentEntries({ storeId }: { storeId: string }) {
+  const [rows, setRows] = React.useState<Array<any>>([]);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!storeId) return;
+
+    const qy = query(
+      collection(db, "stores", storeId, "entries"),
+      orderBy("date", "desc"),
+      limit(5)
+    );
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        setRows(list);
+      },
+      (err) => console.error("[entries] live query error:", err)
+    );
+
+    return () => unsub();
+  }, [storeId]);
+
+
+  const fmt = (ts?: any) =>
+    ts?.toDate?.()?.toLocaleDateString?.("en-CA") ?? "";
+
+  async function onDelete(id: string) {
+    if (!storeId) return;
+    if (!confirm("Delete this entry?")) return;
+    try {
+      setBusyId(id);
+      await deleteDoc(doc(db, "stores", storeId, "entries", id));
+      setRows((s) => s.filter((r) => r.id !== id));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="mt-8 overflow-x-auto">
+      <h3 className="font-semibold mb-2">Recent entries</h3>
+      <table className="min-w-[760px] text-sm">
+        <thead>
+          <tr className="text-left border-b">
+            <th className="py-2 pr-4">Date</th>
+            <th className="py-2 pr-4">Vendor</th>
+            <th className="py-2 pr-4">Account</th>
+            <th className="py-2 pr-4">Amount</th>
+            <th className="py-2 pr-4">HST</th>
+            <th className="py-2 pr-4">Net</th>
+            <th className="py-2 pr-4">Description</th>
+            <th className="py-2 pr-4"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className="border-b last:border-b-0 align-top">
+              <td className="py-2 pr-4">{fmt(r.date)}</td>
+              <td className="py-2 pr-4">{r.vendor ?? ""}</td>
+              <td className="py-2 pr-4">{r.account ?? ""}</td>
+              <td className="py-2 pr-4">{Number(r.amount || 0).toFixed(2)}</td>
+              <td className="py-2 pr-4">{Number(r.hst || 0).toFixed(2)}</td>
+              <td className="py-2 pr-4">{Number(r.net || 0).toFixed(2)}</td>
+              <td className="py-2 pr-4">{r.description ?? ""}</td>
+              <td className="py-2 pr-4">
+                <button
+                  className="underline"
+                  onClick={() => onDelete(r.id)}
+                  disabled={busyId === r.id}
+                  title="Delete entry"
+                >
+                  {busyId === r.id ? "Deleting…" : "Delete"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function EntriesPage() {
-  const router = useRouter();
-  const params = useParams<{ storeId: string }>();
-  const storeId = params?.storeId;
+  const { storeId } = useParams<{ storeId: string }>();
 
-  // form state
-  const [date, setDate] = useState<string>(() => {
-    // default to today in YYYY-MM-DD
+  // ---- load Accounts for dropdown ----
+  const [accounts, setAccounts] = React.useState<string[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = React.useState(true);
+  const FORBIDDEN = "1050 Petty Cash"; // reserved
+
+  React.useEffect(() => {
+    if (!storeId) return;
+    (async () => {
+      setLoadingAccounts(true);
+      try {
+        const snap = await getDocs(collection(db, "stores", storeId, "accounts"));
+        const names: string[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as AccountDoc;
+          if (data?.name) names.push(data.name);
+        });
+        names.sort((a, b) => a.localeCompare(b, "en"));
+        setAccounts(names.filter((n) => n !== FORBIDDEN));
+      } catch (err) {
+        console.error("[entries] load accounts failed:", err);
+        setAccounts([]); // fallback to manual input
+      } finally {
+        setLoadingAccounts(false);
+      }
+    })();
+  }, [storeId]);
+
+  // ---- vendor suggestions (recent vendors) ----
+  const [vendors, setVendors] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (!storeId) return;
+    (async () => {
+      const qy = query(
+        collection(db, "stores", storeId, "entries"),
+        orderBy("date", "desc"),
+        limit(25)
+      );
+      const snap = await getDocs(qy);
+      const set = new Set<string>();
+      snap.forEach((d) => {
+        const v = (d.data() as any)?.vendor;
+        if (v && typeof v === "string") set.add(v);
+      });
+      setVendors(Array.from(set).sort((a, b) => a.localeCompare(b, "en")));
+    })();
+  }, [storeId]);
+
+  // ---- add-entry form state ----
+  const [date, setDate] = React.useState<string>(() => {
     const t = new Date();
     const mm = String(t.getMonth() + 1).padStart(2, "0");
     const dd = String(t.getDate()).padStart(2, "0");
     return `${t.getFullYear()}-${mm}-${dd}`;
   });
-  const [vendor, setVendor] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState<string>(""); // gross
-  const [hst, setHst] = useState<string>(""); // tax portion
-  const [type, setType] = useState<"FOH" | "BOH" | "OTHER" | "TRAVEL">("FOH");
-  const [account, setAccount] = useState<string>("");
+  const [vendor, setVendor] = React.useState("");
+  const [description, setDescription] = React.useState("");
+  const [amount, setAmount] = React.useState<string>("");
+  const [hst, setHst] = React.useState<string>("");
+  const [account, setAccount] = React.useState<string>("");
 
-  // ui state
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const amt = Number.parseFloat(amount || "0");
+  const hstNum = Number.parseFloat(hst || "0");
+  const net = React.useMemo(() => Number((amt - hstNum).toFixed(2)), [amt, hstNum]);
+  const month = React.useMemo(() => date.slice(0, 7), [date]);
 
-  // accounts for the dropdown
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  function fillHst13() {
+    if (!amount) return;
+    const v = Math.round(amt * 0.13 * 100) / 100;
+    setHst(v.toFixed(2));
+  }
 
-  useEffect(() => {
-    if (!storeId) return;
-    const q = query(
-      collection(db, "stores", storeId, "accounts"),
-      // if you didn’t store a "name" field, remove orderBy
-      orderBy("name")
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const rows: Account[] = snap.docs.map((d) => {
-        const data = d.data() as any;
-        // support either {name: "..."} or plain docs where id is the visible value
-        return { id: d.id, name: data?.name ?? d.id };
-      });
-      setAccounts(rows);
-      // select first account if none chosen
-      if (!account && rows.length) setAccount(rows[0].name);
-    });
-    return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId]);
-
-  // derived net = amount - hst
-  const net = useMemo(() => {
-    const a = Number.parseFloat(amount || "0");
-    const h = Number.parseFloat(hst || "0");
-    const n = a - h;
-    return Number.isFinite(n) ? n : 0;
-  }, [amount, hst]);
-
-  async function handleSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setMessage(null);
-    setError(null);
+    if (!storeId || !account || !date || !amount) return;
 
-    if (!storeId) {
-      setError("Missing storeId in route.");
-      return;
-    }
-    if (!account) {
-      setError("Please select an account (Settings → Accounts).");
-      return;
-    }
-    if (!amount || Number.isNaN(Number.parseFloat(amount))) {
-      setError("Please enter a valid Amount.");
-      return;
-    }
-    if (!hst || Number.isNaN(Number.parseFloat(hst))) {
-      setError("Please enter a valid HST (use 0 if none).");
-      return;
-    }
-
-    try {
-      setSaving(true);
-
-      // convert yyyy-mm-dd to Firestore Timestamp (local midnight)
-      const when = Timestamp.fromDate(new Date(`${date}T00:00:00`));
-      const month = date.slice(0, 7); // "YYYY-MM"
-      const monthStr = date.slice(0, 7); 
-
+    const when = Timestamp.fromDate(new Date(`${date}T00:00:00`));
     await addDoc(collection(db, "stores", storeId, "entries"), {
       date: when,
-      vendor: vendor.trim(),
-      description: description.trim(),
-      amount: Number.parseFloat(amount), // gross
-      hst: Number.parseFloat(hst),
-      net: Number.parseFloat((net as number).toFixed(2)),
-      type,
+      vendor,
+      description,
+      amount: Number(amt.toFixed(2)),
+      hst: Number(hstNum.toFixed(2)),
+      net,
       account,
-      month: monthStr,                  // <-- add this
-      createdAt: serverTimestamp(),
+      type: "",
+      month,
+      createdAt: Timestamp.now(),
     });
 
-
-      setMessage("Saved!");
-      // reset the quick-entry fields but keep date/account/type
-      setVendor("");
-      setDescription("");
-      setAmount("");
-      setHst("");
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message ?? "Failed to save entry.");
-    } finally {
-      setSaving(false);
-    }
+    setVendor("");
+    setDescription("");
+    setAmount("");
+    setHst("");
+    setAccount("");
+    alert("Entry added.");
   }
 
   if (!storeId) return <main className="p-6">No store selected.</main>;
 
   return (
-    <main className="min-h-screen p-6">
-      <h1 className="text-2xl font-semibold mb-2">Petty Cash — Entries</h1>
-      <p className="mb-4 text-sm">
-        Store: <strong>{String(storeId)}</strong>
-      </p>
+    <main className="p-6">
+      <h1 className="text-2xl font-semibold mb-4">Entries</h1>
 
-      {!accounts.length ? (
-        <div className="mb-6 p-3 border rounded-md">
-          <p className="mb-2">
-            No Accounts found for this store. Go to{" "}
-            <button
-              type="button"
-              onClick={() => router.push(`/store/${storeId}/settings`)}
-              className="underline"
-            >
-              Settings → Accounts
-            </button>{" "}
-            to add/import accounts.
-          </p>
-        </div>
-      ) : null}
-
-      <form onSubmit={handleSubmit} className="space-y-4 max-w-xl">
-        <div>
-          <label className="block text-sm mb-1">Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full border px-3 py-2 rounded"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm mb-1">Vendor</label>
-          <input
-            type="text"
-            value={vendor}
-            onChange={(e) => setVendor(e.target.value)}
-            className="w-full border px-3 py-2 rounded"
-            placeholder="Costco, LCBO, etc."
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm mb-1">Description</label>
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full border px-3 py-2 rounded"
-            placeholder="Paper towels"
-            required
-          />
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-2">Add entry</h2>
+        <form onSubmit={onSubmit} className="grid grid-cols-6 gap-3 max-w-5xl items-end">
           <div>
-            <label className="block text-sm mb-1">Amount (gross)</label>
+            <label className="block text-sm mb-1">Date</label>
             <input
-              inputMode="decimal"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              required
+            />
+          </div>
+
+          <div className="col-span-2">
+            <label className="block text-sm mb-1">Vendor</label>
+            <input
+              list="vendors"
+              type="text"
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              placeholder="Costco / LCBO / …"
+            />
+            <datalist id="vendors">
+              {vendors.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+          </div>
+
+          <div className="col-span-3">
+            <label className="block text-sm mb-1">Description</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              placeholder="Paper towels, etc."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">Amount</label>
+            <input
               type="number"
               step="0.01"
               min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full border px-3 py-2 rounded"
+              className="border px-3 py-2 rounded w-full"
               required
             />
           </div>
+
           <div>
-            <label className="block text-sm mb-1">HST</label>
+            <label className="block text-sm mb-1 flex items-center gap-2">
+              HST
+              <button
+                type="button"
+                className="underline text-xs"
+                onClick={fillHst13}
+                title="Fill with 13% of amount"
+              >
+                13%
+              </button>
+              <button
+                type="button"
+                className="underline text-xs"
+                onClick={() => setHst("")}
+                title="Clear HST"
+              >
+                clear
+              </button>
+            </label>
             <input
-              inputMode="decimal"
               type="number"
               step="0.01"
               min="0"
               value={hst}
               onChange={(e) => setHst(e.target.value)}
-              className="w-full border px-3 py-2 rounded"
-              required
+              className="border px-3 py-2 rounded w-full"
+              placeholder="e.g., 13.00"
             />
           </div>
+
           <div>
-            <label className="block text-sm mb-1">Net (auto)</label>
+            <label className="block text-sm mb-1">Net</label>
             <input
               type="number"
-              readOnly
+              step="0.01"
               value={Number.isFinite(net) ? net : 0}
-              className="w-full border px-3 py-2 rounded bg-gray-50"
-              tabIndex={-1}
+              readOnly
+              className="border px-3 py-2 rounded w-full bg-gray-50"
             />
           </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm mb-1">Type</label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value as any)}
-              className="w-full border px-3 py-2 rounded"
-            >
-              <option value="FOH">FOH</option>
-              <option value="BOH">BOH</option>
-              <option value="OTHER">OTHER</option>
-              <option value="TRAVEL">TRAVEL</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Account</label>
-          <select
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            className="w-full border px-3 py-2 rounded"
-          >
-            {accounts
-              .filter((a) => a.name !== "1050 Petty Cash")
-              .map((a) => (
-                <option key={a.id} value={a.name}>
-                  {a.name}
+          <div className="col-span-3">
+            <label className="block text-sm mb-1">Account (from template)</label>
+
+            {(!loadingAccounts && accounts.length === 0) ? (
+              <>
+                <input
+                  type="text"
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                  placeholder="Type account exactly as in the Accounts list"
+                  required
+                />
+                <p className="text-xs mt-1 text-amber-700">
+                  Couldn’t load Accounts (check Firestore rules). You can type it exactly for now.
+                </p>
+              </>
+            ) : (
+              <select
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                disabled={loadingAccounts}
+                required
+              >
+                <option value="" disabled>
+                  {loadingAccounts ? "Loading accounts…" : "Select account"}
                 </option>
-              ))}
-          </select>
+                {accounts.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
 
+            <p className="text-xs mt-1 opacity-70">
+              “1050 Petty Cash” is reserved for the month-end offset and is hidden here.
+            </p>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={saving || !accounts.length}
-            className="border px-4 py-2 rounded"
-          >
-            {saving ? "Saving…" : "Save entry"}
-          </button>
-          {message && <span className="text-green-700">{message}</span>}
-          {error && <span className="text-red-700">{error}</span>}
-        </div>
-      </form>
-      // --- Recent Entries (below the form) ---
-function RecentEntries({ storeId }: { storeId: string }) {
-  const [rows, setRows] = React.useState<Array<any>>([]);
+          <div className="col-span-6">
+            <button className="border px-4 py-2 rounded">Add entry</button>
+          </div>
+        </form>
+      </section>
 
-  React.useEffect(() => {
-    if (!storeId) return;
-    const qy = query(
-      collection(db, "stores", storeId, "entries"),
-      orderBy("date", "desc"),
-      limit(25)
-    );
-    const unsub = onSnapshot(qy, (snap) => {
-      setRows(
-        snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
-      );
-    });
-    return () => unsub();
-  }, [storeId]);
-
-  const fmtDate = (ts?: any) =>
-    ts?.toDate ? ts.toDate().toLocaleDateString("en-CA") : "";
-  const money = (n: number) =>
-    Number.isFinite(n) ? n.toFixed(2) : "0.00";
-
-  if (!rows.length) return (
-    <section className="mt-8">
-      <h2 className="text-xl font-semibold mb-2">Recent entries</h2>
-      <p className="text-sm text-gray-600">No entries yet.</p>
-    </section>
-  );
-
-  return (
-    <section className="mt-8">
-      <h2 className="text-xl font-semibold mb-2">Recent entries</h2>
-      <div className="overflow-x-auto">
-        <table className="min-w-[720px] text-sm">
-          <thead>
-            <tr className="text-left border-b">
-              <th className="py-2 pr-4">Date</th>
-              <th className="py-2 pr-4">Vendor</th>
-              <th className="py-2 pr-4">Description</th>
-              <th className="py-2 pr-4">Type</th>
-              <th className="py-2 pr-4">Account</th>
-              <th className="py-2 pr-4">Gross</th>
-              <th className="py-2 pr-4">HST</th>
-              <th className="py-2 pr-4">Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-b last:border-b-0">
-                <td className="py-2 pr-4">{fmtDate(r.date)}</td>
-                <td className="py-2 pr-4">{r.vendor}</td>
-                <td className="py-2 pr-4">{r.description}</td>
-                <td className="py-2 pr-4">{r.type}</td>
-                <td className="py-2 pr-4">{r.account}</td>
-                <td className="py-2 pr-4">{money(r.amount)}</td>
-                <td className="py-2 pr-4">{money(r.hst)}</td>
-                <td className="py-2 pr-4">{money(r.net)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <a
-  href={`/api/store/${storeId}/qbo-export`}
-  className="inline-block mt-6 border px-4 py-2 rounded"
->
-  Export QBO (CSV) — scaffold
-</a>
-
-      </div>
-    </section>
-  );
-}
-
+      <RecentEntries storeId={storeId} />
     </main>
   );
 }
+
