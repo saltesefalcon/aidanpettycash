@@ -21,22 +21,20 @@ const ALLOWED_ACCOUNTS = new Set<string>([
 
 function toAscii(s: string) {
   return s
-    .replace(/\u2013|\u2014/g, "-")  // en/em dash → hyphen
-    .replace(/[\u2018\u2019]/g, "'") // smart single quotes → straight
-    .replace(/[\u201C\u201D]/g, '"') // smart double quotes → straight
-    .replace(/\u00A0/g, " ");        // nbsp → space
+    .replace(/\u2013|\u2014/g, "-")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\u00A0/g, " ");
 }
 
-export async function GET(
-  req: Request,
-  context: { params: { storeId: string } }
-) {
-  const { storeId } = context.params;
+export async function GET(req: Request, ctx: { params: Promise<{ storeId: string }> }) {
+  const { storeId } = await ctx.params;
+
   const url = new URL(req.url);
 
   const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-  const jn = url.searchParams.get("jn") ?? "";
+  const to   = url.searchParams.get("to");
+  const jn   = url.searchParams.get("jn") ?? "";
   const includeCashIns = url.searchParams.get("includeCashIns") === "1";
   const cashInCreditAccount = url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
 
@@ -50,7 +48,7 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
-  // Smoke CSV (no Firestore)
+  // Quick “smoke” CSV without touching Firestore
   if (smoke) {
     const BOM = "\uFEFF";
     const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
@@ -97,7 +95,7 @@ export async function GET(
       );
     }
 
-    // === AUDIT MODE (JSON) ===
+    // AUDIT mode
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
@@ -109,7 +107,7 @@ export async function GET(
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date: e.date?.toDate?.()?.toISOString?.()?.slice(0,10) ?? null,
+            date: e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
@@ -129,7 +127,7 @@ export async function GET(
       });
     }
 
-    // === DEBUG PREVIEW (first lines + totals) ===
+    // DEBUG preview (JSON summary)
     if (debug && preview) {
       const csv0 = buildQboCsv({
         entries, cashins, includeCashIns, cashInCreditAccount,
@@ -157,7 +155,7 @@ export async function GET(
       });
     }
 
-    // === REAL CSV DOWNLOAD ===
+    // REAL CSV download
     const csv0 = buildQboCsv({
       entries, cashins, includeCashIns, cashInCreditAccount,
       storeId, journalNo: jn, journalDate: to!,
