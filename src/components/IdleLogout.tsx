@@ -25,10 +25,17 @@ export default function IdleLogout() {
       mark();
     };
 
-    const events: Array<keyof WindowEventMap> = [
-      'mousedown','mousemove','keydown','touchstart','scroll','focus','visibilitychange'
+    // ✅ Window-level activity events (NO 'visibilitychange' here)
+    const winEvents: Array<keyof WindowEventMap> = [
+      'mousedown','mousemove','keydown','touchstart','scroll','focus'
     ];
-    events.forEach(ev => window.addEventListener(ev, onAny, { passive: true }));
+    winEvents.forEach(ev => window.addEventListener(ev, onAny, { passive: true }));
+
+    // ✅ Document-level visibility event
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden') mark();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
 
     // If another tab signs out, mirror it here
     const onStorage = (e: StorageEvent) => {
@@ -50,7 +57,8 @@ export default function IdleLogout() {
     }, CHECK_MS);
 
     return () => {
-      events.forEach(ev => window.removeEventListener(ev, onAny));
+      winEvents.forEach(ev => window.removeEventListener(ev, onAny));
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('storage', onStorage);
       clearInterval(t);
     };
