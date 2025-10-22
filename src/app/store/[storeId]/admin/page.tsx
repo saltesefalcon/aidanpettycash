@@ -163,30 +163,33 @@ export default function AdminPage() {
     );
   }
 
+  // Helpers: today in YYYY-MM-DD and input→Timestamp
+const isoToday = () => {
+  const t = new Date();
+  const mm = String(t.getMonth() + 1).padStart(2, "0");
+  const dd = String(t.getDate()).padStart(2, "0");
+  return `${t.getFullYear()}-${mm}-${dd}`;
+};
+const toTs = (yyyyMmDd: string) =>
+  Timestamp.fromDate(new Date(`${yyyyMmDd}T00:00:00`));
+
+
   // ── Opening balance state ──────────────────────────────────────────
   const [openingAmt, setOpeningAmt] = useState<string>("");
   const [openingNote, setOpeningNote] = useState<string>("");
   const [openLoaded, setOpenLoaded] = useState(false);
 
   // ── Cash-in form ──────────────────────────────────────────────────
-  const [ciDate, setCiDate] = useState(() => {
-    const t = new Date();
-    const mm = String(t.getMonth() + 1).padStart(2, "0");
-    const dd = String(t.getDate()).padStart(2, "0");
-    return `${t.getFullYear()}-${mm}-${dd}`;
-  });
+  const [ciDate, setCiDate]   = useState(isoToday);
+
   const [ciAmount, setCiAmount] = useState<string>("");
   const [ciSource, setCiSource] = useState<string>("");
   const [ciNote, setCiNote] = useState<string>("");
   const [showDeletedCashIns, setShowDeletedCashIns] = useState(false);
 
   // ── Deposits form (tracker only) ──────────────────────────────────
-  const [depDate, setDepDate] = useState(() => {
-    const t = new Date();
-    const mm = String(t.getMonth() + 1).padStart(2, "0");
-    const dd = String(t.getDate()).padStart(2, "0");
-    return `${t.getFullYear()}-${mm}-${dd}`;
-  });
+  const [depDate, setDepDate] = useState(isoToday);
+
   const [depAmount, setDepAmount] = useState<string>("");
   const [depMethod, setDepMethod] = useState<string>("Bank");
   const [depNote, setDepNote] = useState<string>("");
@@ -842,7 +845,10 @@ async function onDeleteAudit(a: Audit) {
                             type="date"
                             defaultValue={isoDate(ci.date)}
                             onChange={(e) =>
-                              setEditingCashIn({ ...editingCashIn, date: Timestamp.fromDate(new Date(`${e.target.value}T00:00:00`)) })
+                             setEditingCashIn(prev => ({
+                            ...(prev as CashIn),  // prev is non-null while editing
+                            date: Timestamp.fromDate(new Date(`${e.target.value}T00:00:00`)),
+                          }));
                             }
                             className="border px-2 py-1 rounded"
                           />
@@ -853,7 +859,7 @@ async function onDeleteAudit(a: Audit) {
                             step="0.01"
                             defaultValue={String(ci.amount)}
                             onChange={(e) =>
-                              setEditingCashIn({ ...editingCashIn, amount: Number(e.target.value || 0) })
+                              setEditingCashIn(prev => ({ ...(prev as CashIn), amount: Number(e.target.value || 0) }));
                             }
                             className="border px-2 py-1 rounded w-28"
                           />
@@ -862,7 +868,7 @@ async function onDeleteAudit(a: Audit) {
                           <input
                             defaultValue={ci.source || ""}
                             onChange={(e) =>
-                              setEditingCashIn({ ...editingCashIn, source: e.target.value })
+                              setEditingCashIn(prev => ({ ...(prev as CashIn), source: e.target.value }));
                             }
                             className="border px-2 py-1 rounded"
                           />
@@ -871,7 +877,7 @@ async function onDeleteAudit(a: Audit) {
                           <input
                             defaultValue={ci.note || ""}
                             onChange={(e) =>
-                              setEditingCashIn({ ...editingCashIn, note: e.target.value })
+                              setEditingCashIn(prev => ({ ...(prev as CashIn), note: e.target.value }));
                             }
                             className="border px-2 py-1 rounded"
                           />
