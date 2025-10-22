@@ -7,6 +7,7 @@ import { buildQboCsv } from "@/lib/export/qbo";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Keep in sync with your template's Accounts tab
 const ALLOWED_ACCOUNTS = new Set<string>([
   "5110 Purchases:Beer Purchases",
   "5120 Purchases:Food Purchases",
@@ -19,6 +20,7 @@ const ALLOWED_ACCOUNTS = new Set<string>([
   "1050 Petty Cash",
 ]);
 
+// Optional ASCII sanitizer (for Excel edge-cases or legacy tools)
 function toAscii(s: string) {
   return s
     .replace(/\u2013|\u2014/g, "-")
@@ -27,14 +29,16 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");
 }
 
-export async function GET(req: Request, ctx: { params: Promise<{ storeId: string }> }) {
-  const { storeId } = await ctx.params;
-
+export async function GET(req: Request) {
+  // ---- NEW: derive storeId from the URL, don’t use ctx.params ----
   const url = new URL(req.url);
+  const parts = url.pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","export","qbo"]
+  const i = parts.findIndex((p) => p === "store");
+  const storeId = i >= 0 ? parts[i + 1] : "";
 
   const from = url.searchParams.get("from");
-  const to   = url.searchParams.get("to");
-  const jn   = url.searchParams.get("jn") ?? "";
+  const to = url.searchParams.get("to");
+  const jn = url.searchParams.get("jn") ?? "";
   const includeCashIns = url.searchParams.get("includeCashIns") === "1";
   const cashInCreditAccount = url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
 
@@ -48,7 +52,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ storeId: string
     return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
-  // Quick “smoke” CSV without touching Firestore
+  // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
     const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
@@ -95,7 +99,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ storeId: string
       );
     }
 
-    // AUDIT mode
+    // === AUDIT MODE (JSON) ===
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
@@ -107,7 +111,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ storeId: string
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date: e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
+            date: e.date?.toDate?.()?.toISOString?.()?.slice(0,10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
@@ -127,7 +131,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ storeId: string
       });
     }
 
-    // DEBUG preview (JSON summary)
+    // === DEBUG PREVIEW (first lines + totals) ===
     if (debug && preview) {
       const csv0 = buildQboCsv({
         entries, cashins, includeCashIns, cashInCreditAccount,
@@ -155,7 +159,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ storeId: string
       });
     }
 
-    // REAL CSV download
+    // === REAL CSV DOWNLOAD ===
     const csv0 = buildQboCsv({
       entries, cashins, includeCashIns, cashInCreditAccount,
       storeId, journalNo: jn, journalDate: to!,
@@ -179,4 +183,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ storeId: string
     return new NextResponse(msg, { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 }
+
 

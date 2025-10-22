@@ -1,7 +1,7 @@
 // src/app/api/store/[storeId]/qbo-export/route.ts
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";               // ← ADMIN SDK
-import { Timestamp } from "firebase-admin/firestore";        // ← ADMIN Timestamp
+import { adminDb } from "@/lib/firebaseAdmin";
+import { Timestamp } from "firebase-admin/firestore";
 import { buildQboCsv } from "@/lib/export/qbo";
 
 export const runtime = "nodejs";
@@ -27,12 +27,12 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");
 }
 
-export async function GET(
-  req: Request,
-  context: { params: { storeId: string } }
-) {
-  const { storeId } = context.params;
+export async function GET(req: Request) {
+  // ---- NEW: derive storeId from the URL path ----
   const url = new URL(req.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  const i = parts.findIndex((p) => p === "store");
+  const storeId = i >= 0 ? parts[i + 1] : "";
 
   const from = url.searchParams.get("from");
   const to   = url.searchParams.get("to");
@@ -50,7 +50,6 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
-  // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
     const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
@@ -66,26 +65,20 @@ export async function GET(
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
     const endTs   = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
-    // === ENTRIES (Admin SDK) ===
+    // ENTRIES
     const entRef  = adminDb.collection("stores").doc(storeId).collection("entries");
-    const entSnap = await entRef
-      .where("date", ">=", startTs)
-      .where("date", "<=", endTs)
-      .get();
+    const entSnap = await entRef.where("date", ">=", startTs).where("date", "<=", endTs).get();
     const entries = entSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
     entries.sort((a: any, b: any) =>
       ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
       ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
     );
 
-    // === Optional CASH-INS (Admin SDK) ===
+    // Optional CASH-INS
     let cashins: any[] = [];
     if (includeCashIns) {
       const ciRef  = adminDb.collection("stores").doc(storeId).collection("cashins");
-      const ciSnap = await ciRef
-        .where("date", ">=", startTs)
-        .where("date", "<=", endTs)
-        .get();
+      const ciSnap = await ciRef.where("date", ">=", startTs).where("date", "<=", endTs).get();
       cashins = ciSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       cashins.sort((a: any, b: any) =>
         ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
@@ -93,7 +86,7 @@ export async function GET(
       );
     }
 
-    // === AUDIT MODE (JSON) ===
+    // AUDIT
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
@@ -125,7 +118,7 @@ export async function GET(
       });
     }
 
-    // === DEBUG PREVIEW (first lines + totals) ===
+    // PREVIEW
     if (debug && preview) {
       const csv0 = buildQboCsv({
         entries, cashins, includeCashIns, cashInCreditAccount,
@@ -153,7 +146,7 @@ export async function GET(
       });
     }
 
-    // === REAL CSV DOWNLOAD ===
+    // REAL CSV
     const csv0 = buildQboCsv({
       entries, cashins, includeCashIns, cashInCreditAccount,
       storeId, journalNo: jn, journalDate: to!,
@@ -177,3 +170,5 @@ export async function GET(
     return new NextResponse(msg, { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 }
+
+
