@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -97,17 +97,11 @@ export default function LoginPage() {
           <button type="button" onClick={onResetPassword} className="underline">
             Forgot password?
           </button>
-          <a
-            href="https://console.firebase.google.com/project/aidan-petty-cash/authentication/users"
-            target="_blank"
-            rel="noreferrer"
-            className="underline opacity-80 hover:opacity-100"
-          >
-            Admin users
-          </a>
+          {/* Admin users link intentionally removed */}
         </div>
       </form>
     </div>
   );
 }
+
 
