@@ -1,22 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { auth, db } from "@/lib/firebase";
+import { auth, db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
   const r = useRouter();
   const [stores, setStores] = useState<string[] | null>(null);
 
+  const monthNow = useMemo(() => {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    return `${d.getFullYear()}-${m}`;
+  }, []);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) return r.replace('/login');
-      const m = await getDoc(doc(db, 'memberships', u.uid));
-      const list = (m.exists() ? (m.data().storeIds as string[]) : []) ?? [];
-      setStores(list);
+      try {
+        const m = await getDoc(doc(db, 'memberships', u.uid));
+        const list = (m.exists() ? (m.data().storeIds as string[]) : []) ?? [];
+        setStores(list);
+      } catch {
+        setStores([]);
+      }
     });
     return () => unsub();
   }, [r]);
@@ -41,8 +51,11 @@ export default function Dashboard() {
       {stores && stores.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {stores.map((id) => (
-            <Link key={id} href={`/store/${id}`}
-              className="block rounded-2xl bg-brand-card p-5 hover:ring-2 hover:ring-brand-accent transition">
+            <Link
+              key={id}
+              href={`/store/${id}/entries?m=${monthNow}`}
+              className="block rounded-2xl bg-brand-card p-5 hover:ring-2 hover:ring-brand-accent transition"
+            >
               <div className="text-lg font-medium capitalize">{id}</div>
               <div className="text-sm opacity-70">Open petty cash log</div>
             </Link>
