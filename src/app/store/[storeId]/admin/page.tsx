@@ -843,15 +843,15 @@ async function onDeleteAudit(a: Audit) {
                         <td className="py-2 pr-4">
                           <input
                             type="date"
-                            defaultValue={isoDate(ci.date)}
-                            onChange={(e) =>
-                             setEditingCashIn(prev => ({
-                            ...(prev as CashIn),  // prev is non-null while editing
-                            date: Timestamp.fromDate(new Date(`${e.target.value}T00:00:00`)),
-                          }));
-                            }
                             className="border px-2 py-1 rounded"
+                            defaultValue={isoDate(ci.date)}
+                            onChange={(e) => {
+                              setEditingCashIn(prev =>
+                                prev ? { ...prev, date: toTs(e.target.value) } : prev
+                              );
+                            }}
                           />
+
                         </td>
                         <td className="py-2 pr-4">
                           <input
@@ -1019,16 +1019,16 @@ async function onDeleteAudit(a: Audit) {
                       <tr key={d.id} className="border-b last:border-b-0">
                         <td className="py-2 pr-4">
                           <input
-                            type="date"
-                            defaultValue={isoDate(d.date)}
-                            onChange={(e) =>
-                              setEditingDeposit({
-                                ...editingDeposit,
-                                date: Timestamp.fromDate(new Date(`${e.target.value}T00:00:00`)),
-                              })
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
+                              type="date"
+                              className="border px-2 py-1 rounded"
+                              defaultValue={isoDate(d.date)}
+                              onChange={(e) => {
+                                setEditingDeposit(prev =>
+                                  prev ? { ...prev, date: toTs(e.target.value) } : prev
+                                );
+                              }}
+                            />
+
                         </td>
                         <td className="py-2 pr-4">
                           <input
