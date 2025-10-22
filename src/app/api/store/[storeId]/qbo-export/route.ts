@@ -27,8 +27,11 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");
 }
 
-export async function GET(req: Request, { params }: { params: { storeId: string } }) {
-  const { storeId } = params;
+export async function GET(
+  req: Request,
+  context: { params: { storeId: string } }
+) {
+  const { storeId } = context.params;
   const url = new URL(req.url);
 
   const from = url.searchParams.get("from");
@@ -47,6 +50,7 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
     return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
+  // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
     const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
