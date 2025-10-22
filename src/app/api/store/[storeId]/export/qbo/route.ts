@@ -30,10 +30,10 @@ function toAscii(s: string) {
 }
 
 export async function GET(req: Request) {
-  // ---- NEW: derive storeId from the URL, don’t use ctx.params ----
+  // 🔹 No ctx arg — derive storeId from the URL path
   const url = new URL(req.url);
   const parts = url.pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","export","qbo"]
-  const i = parts.findIndex((p) => p === "store");
+  const i = parts.findIndex(p => p === "store");
   const storeId = i >= 0 ? parts[i + 1] : "";
 
   const from = url.searchParams.get("from");
