@@ -33,6 +33,22 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# --- Petty Cash app additions ---
+
+# Keep example env file in git, but ignore all real envs
+!.env.example
+
+# Firebase service account & any local credentials
+firebase*.json
+
+# Optional: editor + OS junk
+.vscode/
+Thumbs.db
+
+# Optional: other build folders some tools create
+dist/
+
+
 # vercel
 .vercel
 
