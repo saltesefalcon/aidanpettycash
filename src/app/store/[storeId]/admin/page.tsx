@@ -822,106 +822,117 @@ async function onDeleteAudit(a: Audit) {
               </tr>
             </thead>
             <tbody>
-              {cashIns
-                .filter(ci => showDeletedCashIns || !ci.deleted)
-                .map((ci) => {
-                  const edited = !!ci.updatedAt && !ci.deleted;
-                  const rowClass = ci.deleted
-                    ? "opacity-60 line-through"
-                    : edited
-                    ? "bg-yellow-50"
-                    : "";
-                  const creator =
-                    ci.createdByName || ci.createdByEmail || (ci.createdByUid ? `uid:${ci.createdByUid}` : "");
-                  const editor =
-                    ci.updatedByName || ci.updatedByEmail || (ci.updatedByUid ? `uid:${ci.updatedByUid}` : "");
+  {cashIns
+    .filter((ci) => showDeletedCashIns || !ci.deleted)
+    .map((ci) => {
+      const edited = !!ci.updatedAt && !ci.deleted;
+      const rowClass = ci.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
+      const creator =
+        ci.createdByName || ci.createdByEmail || (ci.createdByUid ? `uid:${ci.createdByUid}` : "");
+      const editor =
+        ci.updatedByName || ci.updatedByEmail || (ci.updatedByUid ? `uid:${ci.updatedByUid}` : "");
 
-                  if (editingCashIn?.id === ci.id) {
-                    // Inline edit row
-                    return (
-                      <tr key={ci.id} className="border-b last:border-b-0">
-                        <td className="py-2 pr-4">
-                          <input
-                            type="date"
-                            className="border px-2 py-1 rounded"
-                            defaultValue={isoDate(ci.date)}
-                            onChange={(e) => {
-                              setEditingCashIn(prev =>
-                                prev ? { ...prev, date: toTs(e.target.value) } : prev
-                              );
-                            }}
-                          />
+      if (editingCashIn?.id === ci.id) {
+        // Inline edit row
+        return (
+          <tr key={ci.id} className="border-b last:border-b-0">
+            <td className="py-2 pr-4">
+              <input
+                type="date"
+                className="border px-2 py-1 rounded"
+                defaultValue={isoDate(ci.date)}
+                onChange={(e) =>
+                  setEditingCashIn((prev) =>
+                    prev ? { ...prev, date: toTs(e.target.value) } : prev
+                  )
+                }
+              />
+            </td>
+            <td className="py-2 pr-4">
+              <input
+                type="number"
+                step="0.01"
+                defaultValue={String(ci.amount)}
+                onChange={(e) =>
+                  setEditingCashIn((prev) =>
+                    prev ? { ...(prev as CashIn), amount: Number(e.target.value || 0) } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded w-28"
+              />
+            </td>
+            <td className="py-2 pr-4">
+              <input
+                defaultValue={ci.source || ""}
+                onChange={(e) =>
+                  setEditingCashIn((prev) =>
+                    prev ? { ...(prev as CashIn), source: e.target.value } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded"
+              />
+            </td>
+            <td className="py-2 pr-4">
+              <input
+                defaultValue={ci.note || ""}
+                onChange={(e) =>
+                  setEditingCashIn((prev) =>
+                    prev ? { ...(prev as CashIn), note: e.target.value } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded"
+              />
+            </td>
+            <td className="py-2 pr-4 text-xs">
+              <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                edit…
+              </span>
+            </td>
+            <td className="py-2 pr-4 space-x-2">
+              <button className="underline" onClick={onEditCashInSave}>
+                Save
+              </button>
+              <button className="underline" onClick={() => setEditingCashIn(null)}>
+                Cancel
+              </button>
+            </td>
+          </tr>
+        );
+      }
 
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            type="number"
-                            step="0.01"
-                            defaultValue={String(ci.amount)}
-                            onChange={(e) =>
-                              setEditingCashIn(prev => ({ ...(prev as CashIn), amount: Number(e.target.value || 0) }));
-                            }
-                            className="border px-2 py-1 rounded w-28"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            defaultValue={ci.source || ""}
-                            onChange={(e) =>
-                              setEditingCashIn(prev => ({ ...(prev as CashIn), source: e.target.value }));
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            defaultValue={ci.note || ""}
-                            onChange={(e) =>
-                              setEditingCashIn(prev => ({ ...(prev as CashIn), note: e.target.value }));
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
-                        </td>
-                        <td className="py-2 pr-4 text-xs">
-                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
-                            edit…
-                          </span>
-                        </td>
-                        <td className="py-2 pr-4 space-x-2">
-                          <button className="underline" onClick={onEditCashInSave}>Save</button>
-                          <button className="underline" onClick={() => setEditingCashIn(null)}>Cancel</button>
-                        </td>
-                      </tr>
-                    );
-                  }
+      // Normal (non-edit) row
+      return (
+        <tr key={ci.id} className={`border-b last:border-b-0 ${rowClass}`}>
+          <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
+          <td className="py-2 pr-4">{Number(ci.amount || 0).toFixed(2)}</td>
+          <td className="py-2 pr-4">{ci.source ?? ""}</td>
+          <td className="py-2 pr-4">{ci.note ?? ""}</td>
+          <td className="py-2 pr-4 text-xs">
+            <span
+              className="inline-block rounded px-2 py-0.5 bg-gray-100"
+              title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+            >
+              {creator || "—"}
+            </span>
+          </td>
+          <td className="py-2 pr-4 space-x-3">
+            {!ci.deleted && (
+              <>
+                <button className="underline" onClick={() => setEditingCashIn(ci)}>
+                  Edit
+                </button>
+                <button className="underline text-red-700" onClick={() => onDeleteCashIn(ci.id)}>
+                  Delete
+                </button>
+              </>
+            )}
+            {ci.deleted && <span className="text-xs">deleted</span>}
+          </td>
+        </tr>
+      );
+    })}
+</tbody>
 
-                  return (
-                    <tr key={ci.id} className={`border-b last:border-b-0 ${rowClass}`}>
-                      <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
-                      <td className="py-2 pr-4">{Number(ci.amount || 0).toFixed(2)}</td>
-                      <td className="py-2 pr-4">{ci.source ?? ""}</td>
-                      <td className="py-2 pr-4">{ci.note ?? ""}</td>
-                      <td className="py-2 pr-4 text-xs">
-                        <span
-                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
-                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
-                        >
-                          {creator || "—"}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-4 space-x-3">
-                        {!ci.deleted && (
-                          <>
-                            <button className="underline" onClick={() => setEditingCashIn(ci)}>Edit</button>
-                            <button className="underline text-red-700" onClick={() => onDeleteCashIn(ci.id)}>Delete</button>
-                          </>
-                        )}
-                        {ci.deleted && <span className="text-xs">deleted</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
           </table>
         </div>
       </section>
@@ -1000,105 +1011,118 @@ async function onDeleteAudit(a: Audit) {
               </tr>
             </thead>
             <tbody>
-              {deposits
-                .filter(d => showDeletedDeposits || !d.deleted)
-                .map((d) => {
-                  const edited = !!d.updatedAt && !d.deleted;
-                  const rowClass = d.deleted
-                    ? "opacity-60 line-through"
-                    : edited
-                    ? "bg-yellow-50"
-                    : "";
-                  const creator =
-                    d.createdByName || d.createdByEmail || (d.createdByUid ? `uid:${d.createdByUid}` : "");
-                  const editor =
-                    d.updatedByName || d.updatedByEmail || (d.updatedByUid ? `uid:${d.updatedByUid}` : "");
+  {deposits
+    .filter((d) => showDeletedDeposits || !d.deleted)
+    .map((d) => {
+      const edited = !!d.updatedAt && !d.deleted;
+      const rowClass = d.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
+      const creator =
+        d.createdByName || d.createdByEmail || (d.createdByUid ? `uid:${d.createdByUid}` : "");
+      const editor =
+        d.updatedByName || d.updatedByEmail || (d.updatedByUid ? `uid:${d.updatedByUid}` : "");
 
-                  if (editingDeposit?.id === d.id) {
-                    return (
-                      <tr key={d.id} className="border-b last:border-b-0">
-                        <td className="py-2 pr-4">
-                          <input
-                              type="date"
-                              className="border px-2 py-1 rounded"
-                              defaultValue={isoDate(d.date)}
-                              onChange={(e) => {
-                                setEditingDeposit(prev =>
-                                  prev ? { ...prev, date: toTs(e.target.value) } : prev
-                                );
-                              }}
-                            />
+      if (editingDeposit?.id === d.id) {
+        return (
+          <tr key={d.id} className="border-b last:border-b-0">
+            <td className="py-2 pr-4">
+              <input
+                type="date"
+                className="border px-2 py-1 rounded"
+                defaultValue={isoDate(d.date)}
+                onChange={(e) =>
+                  setEditingDeposit((prev) =>
+                    prev ? { ...prev, date: toTs(e.target.value) } : prev
+                  )
+                }
+              />
+            </td>
+            <td className="py-2 pr-4">
+              <input
+                type="number"
+                step="0.01"
+                defaultValue={String(d.amount)}
+                onChange={(e) =>
+                  setEditingDeposit((prev) =>
+                    prev ? { ...prev, amount: Number(e.target.value || 0) } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded w-28"
+              />
+            </td>
+            <td className="py-2 pr-4">
+              <input
+                defaultValue={d.method || ""}
+                onChange={(e) =>
+                  setEditingDeposit((prev) =>
+                    prev ? { ...prev, method: e.target.value } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded"
+              />
+            </td>
+            <td className="py-2 pr-4">
+              <input
+                defaultValue={d.note || ""}
+                onChange={(e) =>
+                  setEditingDeposit((prev) =>
+                    prev ? { ...prev, note: e.target.value } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded"
+              />
+            </td>
+            <td className="py-2 pr-4 text-xs">
+              <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                edit…
+              </span>
+            </td>
+            <td className="py-2 pr-4 space-x-2">
+              <button className="underline" onClick={onEditDepositSave}>
+                Save
+              </button>
+              <button className="underline" onClick={() => setEditingDeposit(null)}>
+                Cancel
+              </button>
+            </td>
+          </tr>
+        );
+      }
 
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            type="number"
-                            step="0.01"
-                            defaultValue={String(d.amount)}
-                            onChange={(e) =>
-                              setEditingDeposit({ ...editingDeposit, amount: Number(e.target.value || 0) })
-                            }
-                            className="border px-2 py-1 rounded w-28"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            defaultValue={d.method || ""}
-                            onChange={(e) =>
-                              setEditingDeposit({ ...editingDeposit, method: e.target.value })
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            defaultValue={d.note || ""}
-                            onChange={(e) =>
-                              setEditingDeposit({ ...editingDeposit, note: e.target.value })
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
-                        </td>
-                        <td className="py-2 pr-4 text-xs">
-                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
-                            edit…
-                          </span>
-                        </td>
-                        <td className="py-2 pr-4 space-x-2">
-                          <button className="underline" onClick={onEditDepositSave}>Save</button>
-                          <button className="underline" onClick={() => setEditingDeposit(null)}>Cancel</button>
-                        </td>
-                      </tr>
-                    );
-                  }
+      return (
+        <tr key={d.id} className={`border-b last:border-b-0 ${rowClass}`}>
+          <td className="py-2 pr-4">{fmtDate(d.date)}</td>
+          <td className="py-2 pr-4">{Number(d.amount || 0).toFixed(2)}</td>
+          <td className="py-2 pr-4">{d.method ?? ""}</td>
+          <td className="py-2 pr-4">{d.note ?? ""}</td>
+          <td className="py-2 pr-4 text-xs">
+            <span
+              className="inline-block rounded px-2 py-0.5 bg-gray-100"
+              title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+            >
+              {creator || "—"}
+            </span>
+          </td>
+          <td className="py-2 pr-4 space-x-3">
+            {!d.deleted && (
+              <>
+                <button className="underline" onClick={() => setEditingDeposit(d)}>
+                  Edit
+                </button>
+                <button
+                  className="underline text-red-700"
+                  onClick={() => onDeleteDeposit(d.id)}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+            {d.deleted && <span className="text-xs">deleted</span>}
+          </td>
+        </tr>
+      );
+    })}
+</tbody>
 
-                  return (
-                    <tr key={d.id} className={`border-b last:border-b-0 ${rowClass}`}>
-                      <td className="py-2 pr-4">{fmtDate(d.date)}</td>
-                      <td className="py-2 pr-4">{Number(d.amount || 0).toFixed(2)}</td>
-                      <td className="py-2 pr-4">{d.method ?? ""}</td>
-                      <td className="py-2 pr-4">{d.note ?? ""}</td>
-                      <td className="py-2 pr-4 text-xs">
-                        <span
-                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
-                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
-                        >
-                          {creator || "—"}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-4 space-x-3">
-                        {!d.deleted && (
-                          <>
-                            <button className="underline" onClick={() => setEditingDeposit(d)}>Edit</button>
-                            <button className="underline text-red-700" onClick={() => onDeleteDeposit(d.id)}>Delete</button>
-                          </>
-                        )}
-                        {d.deleted && <span className="text-xs">deleted</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
           </table>
         </div>
       </section>
