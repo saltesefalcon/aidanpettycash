@@ -2,10 +2,11 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import {
   addDoc,
   setDoc,
+  updateDoc,
   doc,
   collection,
   query,
@@ -14,33 +15,107 @@ import {
   getDocs,
   Timestamp,
 } from "firebase/firestore";
+import MonthPicker from "@/components/MonthPicker";
 
 // ── Types ───────────────────────────────────────────────────────────
-type CashIn = { id?: string; date: any; amount: number; source?: string; note?: string };
-type Opening = { amount: number; note?: string; createdAt?: any };
-type Deposit = { id?: string; date: any; amount: number; method?: string; note?: string };
-type Audit = {
+type CashIn = {
   id?: string;
   date: any;
-  n5: number; n10: number; n20: number; n50: number; n100: number;
-  change: number; // loose bills/coins in dollars
-  total: number;  // computed counted cash
+  amount: number;
+  source?: string;
   note?: string;
+  month?: string;
+  createdAt?: any;
+  createdByUid?: string;
+  createdByName?: string;
+  createdByEmail?: string;
+  updatedAt?: any;
+  updatedByUid?: string;
+  updatedByName?: string;
+  updatedByEmail?: string;
+  deleted?: boolean;
+  deletedAt?: any;
+  deletedByUid?: string;
+  deletedByName?: string;
+  deletedByEmail?: string;
 };
+
+type Opening = { amount: number; note?: string; createdAt?: any };
+
+type Deposit = {
+  id?: string;
+  date: any;
+  amount: number;
+  method?: string;
+  note?: string;
+  month?: string;
+  createdAt?: any;
+  createdByUid?: string;
+  createdByName?: string;
+  createdByEmail?: string;
+  updatedAt?: any;
+  updatedByUid?: string;
+  updatedByName?: string;
+  updatedByEmail?: string;
+  deleted?: boolean;
+  deletedAt?: any;
+  deletedByUid?: string;
+  deletedByName?: string;
+  deletedByEmail?: string;
+};
+
+  type Audit = {
+    id?: string;
+    date: any;
+    n5: number; n10: number; n20: number; n50: number; n100: number;
+    change: number;
+    total: number;
+    note?: string;
+    // audit metadata (optional)
+    createdAt?: any;
+    createdByUid?: string; createdByName?: string; createdByEmail?: string;
+    updatedAt?: any;
+    updatedByUid?: string; updatedByName?: string; updatedByEmail?: string;
+    deleted?: boolean;
+    deletedAt?: any;
+    deletedByUid?: string; deletedByName?: string; deletedByEmail?: string;
+    month?: string;
+  };
+
 
 export default function AdminPage() {
   const { storeId } = useParams<{ storeId: string }>();
 
-  // ── Month picker defaults to current month (YYYY-MM) ──────────────
+  // Store display name for title
+  const [storeName, setStoreName] = useState<string>(storeId || "");
+
+  // Top-level error banner
+  const [err, setErr] = useState<string | null>(null);
+
+  // ── Month (shared MonthPicker) ─────────────────────────────────────
   const [month, setMonth] = useState(() => {
     const t = new Date();
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
   });
 
-  // ── QBO export options (appear near month selector) ───────────────
+  // ── QBO export options ────────────────────────────────────────────
   const [journalNo, setJournalNo] = useState<string>("");
   const [includeCashIns, setIncludeCashIns] = useState<boolean>(false);
   const [cashInCreditAccount, setCashInCreditAccount] = useState<string>("1000 Bank");
+
+  // Fetch pretty store name for title
+  useEffect(() => {
+    if (!storeId) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "stores", storeId));
+        const name = (snap.data()?.name as string) || String(storeId);
+        setStoreName(name);
+      } catch {
+        setStoreName(String(storeId));
+      }
+    })();
+  }, [storeId]);
 
   const monthStartEnd = (ym: string) => {
     const [y, m] = ym.split("-").map(Number);
@@ -50,7 +125,7 @@ export default function AdminPage() {
     return { from: ymd(start), to: ymd(end) };
   };
 
-  // Client helper: open the API route that generates the CSV (download)
+  // Download CSV
   function downloadCsvForMonthClient() {
     if (!storeId || !month) return;
     const { from, to } = monthStartEnd(month);
@@ -69,7 +144,7 @@ export default function AdminPage() {
     );
   }
 
-  // NEW: Preview helper — returns JSON (no file), ensures no 500s while testing
+  // Preview (JSON – quick balance check & sample)
   function previewCsvForMonthClient() {
     if (!storeId || !month) return;
     const { from, to } = monthStartEnd(month);
@@ -103,8 +178,9 @@ export default function AdminPage() {
   const [ciAmount, setCiAmount] = useState<string>("");
   const [ciSource, setCiSource] = useState<string>("");
   const [ciNote, setCiNote] = useState<string>("");
+  const [showDeletedCashIns, setShowDeletedCashIns] = useState(false);
 
-  // ── Deposits form ─────────────────────────────────────────────────
+  // ── Deposits form (tracker only) ──────────────────────────────────
   const [depDate, setDepDate] = useState(() => {
     const t = new Date();
     const mm = String(t.getMonth() + 1).padStart(2, "0");
@@ -114,6 +190,7 @@ export default function AdminPage() {
   const [depAmount, setDepAmount] = useState<string>("");
   const [depMethod, setDepMethod] = useState<string>("Bank");
   const [depNote, setDepNote] = useState<string>("");
+  const [showDeletedDeposits, setShowDeletedDeposits] = useState(false);
 
   // ── Audit form ────────────────────────────────────────────────────
   const [auditDate, setAuditDate] = useState(() => {
@@ -129,6 +206,7 @@ export default function AdminPage() {
   const [n100, setN100] = useState<string>("0");
   const [chg, setChg] = useState<string>("0");
   const [audits, setAudits] = useState<Audit[]>([]);
+  const [showAudit, setShowAudit] = useState<boolean>(false); // hidden by default
 
   // helpers + computed
   const num = (s: string) => Number.parseFloat(s || "0");
@@ -147,17 +225,23 @@ export default function AdminPage() {
     if (!storeId || !month) return;
     setOpenLoaded(false);
     (async () => {
-      const ref = doc(db, "stores", storeId, "openingBalances", month);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const d = snap.data() as Opening;
-        setOpeningAmt(String(d.amount ?? ""));
-        setOpeningNote(d.note ?? "");
-      } else {
-        setOpeningAmt("");
-        setOpeningNote("");
+      try {
+        setErr(null);
+        const ref = doc(db, "stores", storeId, "openingBalances", month);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const d = snap.data() as Opening;
+          setOpeningAmt(String(d.amount ?? ""));
+          setOpeningNote(d.note ?? "");
+        } else {
+          setOpeningAmt("");
+          setOpeningNote("");
+        }
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+      } finally {
+        setOpenLoaded(true);
       }
-      setOpenLoaded(true);
     })();
   }, [storeId, month]);
 
@@ -165,15 +249,19 @@ export default function AdminPage() {
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
-      const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
-      const snap = await getDocs(qy);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      rows.sort(
-        (a: any, b: any) =>
-          (a.date?.toDate?.() ?? new Date(0)).getTime() -
-          (b.date?.toDate?.() ?? new Date(0)).getTime()
-      );
-      setCashIns(rows as CashIn[]);
+      try {
+        setErr(null);
+        const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
+        const snap = await getDocs(qy);
+        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
+        rows.sort((a: any, b: any) =>
+          (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+        );
+        setCashIns(rows);
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+        setCashIns([]);
+      }
     })();
   }, [storeId, month]);
 
@@ -181,15 +269,19 @@ export default function AdminPage() {
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
-      const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
-      const snap = await getDocs(qy);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      rows.sort(
-        (a: any, b: any) =>
-          (a.date?.toDate?.() ?? new Date(0)).getTime() -
-          (b.date?.toDate?.() ?? new Date(0)).getTime()
-      );
-      setDeposits(rows as Deposit[]);
+      try {
+        setErr(null);
+        const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
+        const snap = await getDocs(qy);
+        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+        rows.sort((a: any, b: any) =>
+          (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+        );
+        setDeposits(rows);
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+        setDeposits([]);
+      }
     })();
   }, [storeId, month]);
 
@@ -197,15 +289,19 @@ export default function AdminPage() {
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
-      const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
-      const snap = await getDocs(qy);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      rows.sort(
-        (a: any, b: any) =>
-          (a.date?.toDate?.() ?? new Date(0)).getTime() -
-          (b.date?.toDate?.() ?? new Date(0)).getTime()
-      );
-      setAudits(rows as Audit[]);
+      try {
+        setErr(null);
+        const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
+        const snap = await getDocs(qy);
+        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        rows.sort((a: any, b: any) =>
+          (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+        );
+        setAudits(rows as Audit[]);
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+        setAudits([]);
+      }
     })();
   }, [storeId, month]);
 
@@ -213,11 +309,17 @@ export default function AdminPage() {
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
-      const qy = query(collection(db, "stores", storeId, "entries"), where("month", "==", month));
-      const snap = await getDocs(qy);
-      let total = 0;
-      snap.forEach((d) => (total += Number(d.data().amount || 0)));
-      setEntriesSum(Number(total.toFixed(2)));
+      try {
+        setErr(null);
+        const qy = query(collection(db, "stores", storeId, "entries"), where("month", "==", month));
+        const snap = await getDocs(qy);
+        let total = 0;
+        snap.forEach((d) => (total += Number(d.data().amount || 0)));
+        setEntriesSum(Number(total.toFixed(2)));
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+        setEntriesSum(0);
+      }
     })();
   }, [storeId, month]);
 
@@ -238,191 +340,372 @@ export default function AdminPage() {
 
   const variance = useMemo(() => Number((counted - closing).toFixed(2)), [counted, closing]);
 
+  const fmtDate = (ts?: any) =>
+    ts?.toDate ? ts.toDate().toLocaleDateString("en-CA") : "";
+
+  const isoDate = (ts?: any) =>
+    ts?.toDate ? ts.toDate().toISOString().slice(0, 10) : "";
+
+  const me = () => {
+    const u = auth.currentUser;
+    return {
+      uid: u?.uid || "unknown",
+      name: u?.displayName || u?.email || "unknown",
+      email: u?.email || "",
+    };
+  };
+
+    function StatCard({
+    label,
+    value,
+    danger = false,
+  }: { label: string; value: number; danger?: boolean }) {
+    const cls =
+      "mt-1 text-lg font-semibold tabular-nums " +
+      (danger ? "text-red-700" : "text-gray-900");
+    return (
+      <div className="border rounded-lg px-4 py-3 min-w-[220px] bg-white">
+        <div className="text-sm text-gray-700">{label}</div>
+        <div className={cls}>
+          {value < 0 ? `-$${Math.abs(value).toFixed(2)}` : `$${value.toFixed(2)}`}
+        </div>
+      </div>
+    );
+  }
+
+
   // ── Save handlers ─────────────────────────────────────────────────
   async function saveOpening(e: React.FormEvent) {
     e.preventDefault();
     if (!storeId || !month) return;
-    await setDoc(doc(db, "stores", storeId, "openingBalances", month), {
-      amount: Number.parseFloat(openingAmt || "0"),
-      note: openingNote,
-      createdAt: Timestamp.now(),
-    });
-    alert("Opening balance saved.");
+    try {
+      setErr(null);
+      await setDoc(doc(db, "stores", storeId, "openingBalances", month), {
+        amount: Number.parseFloat(openingAmt || "0"),
+        note: openingNote,
+        createdAt: Timestamp.now(),
+      });
+      alert("Opening balance saved.");
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
   async function saveCashIn(e: React.FormEvent) {
     e.preventDefault();
     if (!storeId || !ciAmount) return;
-    const when = Timestamp.fromDate(new Date(`${ciDate}T00:00:00`));
-    await addDoc(collection(db, "stores", storeId, "cashins"), {
-      date: when,
-      amount: Number.parseFloat(ciAmount),
-      source: ciSource,
-      note: ciNote,
-      month,
-      createdAt: Timestamp.now(),
-    });
-    setCiAmount("");
-    setCiSource("");
-    setCiNote("");
+    try {
+      setErr(null);
+      const when = Timestamp.fromDate(new Date(`${ciDate}T00:00:00`));
+      const user = me();
+      await addDoc(collection(db, "stores", storeId, "cashins"), {
+        date: when,
+        amount: Number.parseFloat(ciAmount),
+        source: ciSource,
+        note: ciNote,
+        month,
+        createdAt: Timestamp.now(),
+        createdByUid: user.uid,
+        createdByName: user.name,
+        createdByEmail: user.email,
+      });
+      setCiAmount("");
+      setCiSource("");
+      setCiNote("");
 
-    // refresh
-    const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
-    const snap = await getDocs(qy);
-    const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-    rows.sort(
-      (a: any, b: any) =>
-        (a.date?.toDate?.() ?? new Date(0)).getTime() -
-        (b.date?.toDate?.() ?? new Date(0)).getTime()
-    );
-    setCashIns(rows as CashIn[]);
+      // refresh
+      const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setCashIns(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
   async function saveDeposit(e: React.FormEvent) {
     e.preventDefault();
     if (!storeId || !depAmount) return;
-    const when = Timestamp.fromDate(new Date(`${depDate}T00:00:00`));
-    await addDoc(collection(db, "stores", storeId, "deposits"), {
-      date: when,
-      amount: Number.parseFloat(depAmount),
-      method: depMethod,
-      note: depNote,
-      month,
-      createdAt: Timestamp.now(),
-    });
-    setDepAmount("");
-    setDepMethod("Bank");
-    setDepNote("");
+    try {
+      setErr(null);
+      const when = Timestamp.fromDate(new Date(`${depDate}T00:00:00`));
+      const user = me();
+      await addDoc(collection(db, "stores", storeId, "deposits"), {
+        date: when,
+        amount: Number.parseFloat(depAmount),
+        method: depMethod,
+        note: depNote,
+        month,
+        createdAt: Timestamp.now(),
+        createdByUid: user.uid,
+        createdByName: user.name,
+        createdByEmail: user.email,
+      });
+      setDepAmount("");
+      setDepMethod("Bank");
+      setDepNote("");
 
-    // refresh
-    const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
-    const snap = await getDocs(qy);
-    const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-    rows.sort(
-      (a: any, b: any) =>
-        (a.date?.toDate?.() ?? new Date(0)).getTime() -
-        (b.date?.toDate?.() ?? new Date(0)).getTime()
-    );
-    setDeposits(rows as Deposit[]);
+      // refresh
+      const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setDeposits(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
-  // NEW: audit save handler
-  async function onSaveAudit(e: React.FormEvent) {
+  // ── Audit save handler ──────────────────────────────────────────────
+  const onSaveAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!storeId) return;
+    try {
+      setErr(null);
+      const when = Timestamp.fromDate(new Date(`${auditDate}T00:00:00`));
+      const user = me();
 
-    const when = Timestamp.fromDate(new Date(`${auditDate}T00:00:00`));
-    const payload = {
-      date: when,
-      n5: num(n5),
-      n10: num(n10),
-      n20: num(n20),
-      n50: num(n50),
-      n100: num(n100),
-      change: num(chg),
-      total: Number(counted.toFixed(2)),
-      month,
-      createdAt: Timestamp.now(),
-    };
+      const payload: Omit<Audit, "id"> = {
+        date: when,
+        n5: num(n5),
+        n10: num(n10),
+        n20: num(n20),
+        n50: num(n50),
+        n100: num(n100),
+        change: num(chg),
+        total: Number(counted.toFixed(2)),
+        month,
+        createdAt: Timestamp.now(),
+        createdByUid: user.uid,
+        createdByName: user.name,
+        createdByEmail: user.email,
+        deleted: false,
+      };
 
-    await addDoc(collection(db, "stores", storeId, "audits"), payload);
+      await addDoc(collection(db, "stores", storeId, "audits"), payload);
 
-    // reset quick fields
-    setN5("0");
-    setN10("0");
-    setN20("0");
-    setN50("0");
-    setN100("0");
-    setChg("0");
+      // reset quick fields
+      setN5("0"); setN10("0"); setN20("0"); setN50("0"); setN100("0"); setChg("0");
 
-    // refresh audits list
+      // refresh list
+      const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setAudits(rows as Audit[]);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  };
+
+  // ── Audit soft-delete handler ───────────────────────────────────────
+async function onDeleteAudit(a: Audit) {
+  if (!storeId || !a?.id) return;
+  if (!confirm("Delete this audit?")) return;
+  try {
+    setErr(null);
+    const user = me();
+    // Soft-delete via merge (keeps required base fields intact)
+    await setDoc(
+      doc(db, "stores", storeId, "audits", a.id),
+      {
+        deleted: true,
+        deletedAt: Timestamp.now(),
+        deletedByUid: user.uid,
+        deletedByName: user.name,
+        deletedByEmail: user.email,
+        updatedAt: Timestamp.now(),
+        updatedByUid: user.uid,
+        updatedByName: user.name,
+        updatedByEmail: user.email,
+      },
+      { merge: true }
+    );
+
+    // refresh
     const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
     const snap = await getDocs(qy);
-    const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-    rows.sort(
-      (a: any, b: any) =>
-        (a.date?.toDate?.() ?? new Date(0)).getTime() -
-        (b.date?.toDate?.() ?? new Date(0)).getTime()
+    const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    rows.sort((x: any, y: any) =>
+      (x.date?.toDate?.()?.getTime?.() ?? 0) - (y.date?.toDate?.()?.getTime?.() ?? 0)
     );
     setAudits(rows as Audit[]);
+  } catch (e: any) {
+    setErr(e?.message || String(e));
+  }
+}
+
+  // ── Edit/Delete (soft delete) helpers ─────────────────────────────
+  const [editingCashIn, setEditingCashIn] = useState<CashIn | null>(null);
+  const [editingDeposit, setEditingDeposit] = useState<Deposit | null>(null);
+
+  async function onEditCashInSave() {
+    if (!storeId || !editingCashIn?.id) return;
+    try {
+      setErr(null);
+      const user = me();
+      await updateDoc(doc(db, "stores", storeId, "cashins", editingCashIn.id), {
+        date: Timestamp.fromDate(new Date(`${isoDate(editingCashIn.date) || ciDate}T00:00:00`)),
+        amount: Number(editingCashIn.amount || 0),
+        source: editingCashIn.source || "",
+        note: editingCashIn.note || "",
+        month,
+        updatedAt: Timestamp.now(),
+        updatedByUid: user.uid,
+        updatedByName: user.name,
+        updatedByEmail: user.email,
+      } as any);
+      setEditingCashIn(null);
+
+      // refresh
+      const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setCashIns(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
-  const fmtDate = (ts?: any) => (ts?.toDate ? ts.toDate().toLocaleDateString("en-CA") : "");
+  async function onDeleteCashIn(id?: string) {
+    if (!storeId || !id) return;
+    try {
+      setErr(null);
+      const user = me();
+      await updateDoc(doc(db, "stores", storeId, "cashins", id), {
+        deleted: true,
+        deletedAt: Timestamp.now(),
+        deletedByUid: user.uid,
+        deletedByName: user.name,
+        deletedByEmail: user.email,
+      } as any);
+
+      // refresh
+      const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setCashIns(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }
+
+  async function onEditDepositSave() {
+    if (!storeId || !editingDeposit?.id) return;
+    try {
+      setErr(null);
+      const user = me();
+      await updateDoc(doc(db, "stores", storeId, "deposits", editingDeposit.id), {
+        date: Timestamp.fromDate(new Date(`${isoDate(editingDeposit.date) || depDate}T00:00:00`)),
+        amount: Number(editingDeposit.amount || 0),
+        method: editingDeposit.method || "",
+        note: editingDeposit.note || "",
+        month,
+        updatedAt: Timestamp.now(),
+        updatedByUid: user.uid,
+        updatedByName: user.name,
+        updatedByEmail: user.email,
+      } as any);
+      setEditingDeposit(null);
+
+      const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setDeposits(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }
+
+  async function onDeleteDeposit(id?: string) {
+    if (!storeId || !id) return;
+    try {
+      setErr(null);
+      const user = me();
+      await updateDoc(doc(db, "stores", storeId, "deposits", id), {
+        deleted: true,
+        deletedAt: Timestamp.now(),
+        deletedByUid: user.uid,
+        deletedByName: user.name,
+        deletedByEmail: user.email,
+      } as any);
+
+      const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+      rows.sort((a: any, b: any) =>
+        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+      );
+      setDeposits(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }
 
   if (!storeId) return <main className="p-6">No store selected.</main>;
 
   // ── UI ────────────────────────────────────────────────────────────
   return (
-    <main className="min-h-screen p-6">
-      <h1 className="text-2xl font-semibold mb-2">Petty Cash — Admin</h1>
+    <main className="min-h-screen p-6 space-y-6">
+     <h1 className="text-2xl font-semibold mb-2 capitalize">{storeName} · Admin</h1>
 
-      {/* Month selector & rollup + QBO options */}
-      <div className="mb-6 flex flex-col gap-4">
-        <div className="flex items-end gap-6">
+{/* Summary cards (label on top, amount below) */}
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-4">
+  <StatCard label="Entries (gross)" value={entriesSum} />
+  <StatCard label="Cash in" value={cashInSum} />
+  <StatCard label="Opening" value={opening} />
+  <StatCard label="Projected closing" value={closing} danger={closing < 0} />
+  <StatCard label="Deposits (tracker)" value={depositsSum} />
+</div>
+
+      {/* Filters / Export controls */}
+      <section className="rounded-lg border bg-white p-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
           <div>
             <label className="block text-sm mb-1">Month</label>
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="border px-3 py-2 rounded"
-            />
+            <MonthPicker value={month} onChange={setMonth} />
           </div>
-          <div className="text-sm">
-            <div>
-              Entries (gross): <strong>${entriesSum.toFixed(2)}</strong>
-            </div>
-            <div>
-              Cash in: <strong>${cashInSum.toFixed(2)}</strong>
-            </div>
-            <div>
-              Opening: <strong>${opening.toFixed(2)}</strong>
-            </div>
-            <div className="mt-1">
-              Projected closing: <strong>${closing.toFixed(2)}</strong>
-            </div>
-            <div className="mt-1 opacity-80">
-              Deposits (tracker): <strong>${depositsSum.toFixed(2)}</strong>
-            </div>
-          </div>
-        </div>
 
-        {/* QBO CSV options + buttons */}
-        <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-sm mb-1">Journal # (optional)</label>
             <input
               type="text"
               value={journalNo}
               onChange={(e) => setJournalNo(e.target.value)}
-              className="border px-3 py-2 rounded"
+              className="border px-3 py-2 rounded w-full"
               placeholder="e.g., PC-20251012"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              id="incl-ci"
-              type="checkbox"
-              checked={includeCashIns}
-              onChange={(e) => setIncludeCashIns(e.target.checked)}
-            />
-            <label htmlFor="incl-ci" className="text-sm">
-              Include cash-ins
-            </label>
-          </div>
+
           <div>
             <label className="block text-sm mb-1">Cash-in credit account</label>
             <input
               type="text"
               value={cashInCreditAccount}
               onChange={(e) => setCashInCreditAccount(e.target.value)}
-              className="border px-3 py-2 rounded"
+              className="border px-3 py-2 rounded w-full"
               disabled={!includeCashIns}
               placeholder="1000 Bank"
             />
           </div>
 
-          <div className="ml-auto flex gap-2">
+          <div className="flex gap-2 md:justify-end">
             <button
               type="button"
               className="border px-3 py-2 rounded"
@@ -433,7 +716,7 @@ export default function AdminPage() {
             </button>
             <button
               type="button"
-              className="underline"
+              className="border px-3 py-2 rounded"
               onClick={downloadCsvForMonthClient}
               title="Download the actual CSV"
             >
@@ -441,42 +724,30 @@ export default function AdminPage() {
             </button>
           </div>
         </div>
-      </div>
-
-      {/* Opening balance */}
-      <section className="mb-8">
-        <h2 className="text-xl font-semibold mb-2">Opening balance</h2>
-        <form onSubmit={saveOpening} className="grid grid-cols-3 gap-3 max-w-3xl">
-          <div>
-            <label className="block text-sm mb-1">Amount</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={openingAmt}
-              onChange={(e) => setOpeningAmt(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-sm mb-1">Note</label>
-            <input
-              type="text"
-              value={openingNote}
-              onChange={(e) => setOpeningNote(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
-          <div>
-            <button className="border px-4 py-2 rounded mt-6">Save opening</button>
-          </div>
-          {!openLoaded && <div className="col-span-3 text-sm">Loading…</div>}
-        </form>
       </section>
 
+      {/* dismissible error */}
+      {err && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex items-start justify-between gap-4">
+          <div>Error: {err}</div>
+          <button className="underline" onClick={() => setErr(null)}>dismiss</button>
+        </div>
+      )}
+
       {/* Cash in */}
-      <section className="mb-8">
-        <h2 className="text-xl font-semibold mb-2">Cash in (refill)</h2>
+      <section className="rounded-lg border bg-white p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Cash in (refill)</h2>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={includeCashIns}
+              onChange={(e) => setIncludeCashIns(e.target.checked)}
+            />
+            Include cash-ins in QBO export
+          </label>
+        </div>
+
         <form onSubmit={saveCashIn} className="grid grid-cols-4 gap-3 max-w-4xl">
           <div>
             <label className="block text-sm mb-1">Date</label>
@@ -526,32 +797,132 @@ export default function AdminPage() {
 
         {/* List cash-ins */}
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[560px] text-sm">
+          <div className="mb-2 flex items-center gap-4 text-sm">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showDeletedCashIns}
+                onChange={(e) => setShowDeletedCashIns(e.target.checked)}
+              />
+              Show deleted
+            </label>
+          </div>
+          <table className="min-w-[720px] text-sm">
             <thead>
               <tr className="text-left border-b">
                 <th className="py-2 pr-4">Date</th>
                 <th className="py-2 pr-4">Amount</th>
                 <th className="py-2 pr-4">Source</th>
                 <th className="py-2 pr-4">Note</th>
+                <th className="py-2 pr-4">By</th>
+                <th className="py-2 pr-4">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {cashIns.map((ci) => (
-                <tr key={ci.id} className="border-b last:border-b-0">
-                  <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
-                  <td className="py-2 pr-4">{Number(ci.amount || 0).toFixed(2)}</td>
-                  <td className="py-2 pr-4">{ci.source ?? ""}</td>
-                  <td className="py-2 pr-4">{ci.note ?? ""}</td>
-                </tr>
-              ))}
+              {cashIns
+                .filter(ci => showDeletedCashIns || !ci.deleted)
+                .map((ci) => {
+                  const edited = !!ci.updatedAt && !ci.deleted;
+                  const rowClass = ci.deleted
+                    ? "opacity-60 line-through"
+                    : edited
+                    ? "bg-yellow-50"
+                    : "";
+                  const creator =
+                    ci.createdByName || ci.createdByEmail || (ci.createdByUid ? `uid:${ci.createdByUid}` : "");
+                  const editor =
+                    ci.updatedByName || ci.updatedByEmail || (ci.updatedByUid ? `uid:${ci.updatedByUid}` : "");
+
+                  if (editingCashIn?.id === ci.id) {
+                    // Inline edit row
+                    return (
+                      <tr key={ci.id} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4">
+                          <input
+                            type="date"
+                            defaultValue={isoDate(ci.date)}
+                            onChange={(e) =>
+                              setEditingCashIn({ ...editingCashIn, date: Timestamp.fromDate(new Date(`${e.target.value}T00:00:00`)) })
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            type="number"
+                            step="0.01"
+                            defaultValue={String(ci.amount)}
+                            onChange={(e) =>
+                              setEditingCashIn({ ...editingCashIn, amount: Number(e.target.value || 0) })
+                            }
+                            className="border px-2 py-1 rounded w-28"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={ci.source || ""}
+                            onChange={(e) =>
+                              setEditingCashIn({ ...editingCashIn, source: e.target.value })
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={ci.note || ""}
+                            onChange={(e) =>
+                              setEditingCashIn({ ...editingCashIn, note: e.target.value })
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                            edit…
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4 space-x-2">
+                          <button className="underline" onClick={onEditCashInSave}>Save</button>
+                          <button className="underline" onClick={() => setEditingCashIn(null)}>Cancel</button>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr key={ci.id} className={`border-b last:border-b-0 ${rowClass}`}>
+                      <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
+                      <td className="py-2 pr-4">{Number(ci.amount || 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4">{ci.source ?? ""}</td>
+                      <td className="py-2 pr-4">{ci.note ?? ""}</td>
+                      <td className="py-2 pr-4 text-xs">
+                        <span
+                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
+                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+                        >
+                          {creator || "—"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 space-x-3">
+                        {!ci.deleted && (
+                          <>
+                            <button className="underline" onClick={() => setEditingCashIn(ci)}>Edit</button>
+                            <button className="underline text-red-700" onClick={() => onDeleteCashIn(ci.id)}>Delete</button>
+                          </>
+                        )}
+                        {ci.deleted && <span className="text-xs">deleted</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
       </section>
 
       {/* Deposits tracker */}
-      <section className="mb-8">
-        <h2 className="text-xl font-semibold mb-2">Deposits (tracker)</h2>
+      <section className="rounded-lg border bg-white p-4">
+        <h2 className="text-lg font-semibold mb-3">Deposits (tracker)</h2>
         <form onSubmit={saveDeposit} className="grid grid-cols-4 gap-3 max-w-4xl">
           <div>
             <label className="block text-sm mb-1">Date</label>
@@ -601,158 +972,253 @@ export default function AdminPage() {
 
         {/* List deposits */}
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[560px] text-sm">
+          <div className="mb-2 flex items-center gap-4 text-sm">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showDeletedDeposits}
+                onChange={(e) => setShowDeletedDeposits(e.target.checked)}
+              />
+              Show deleted
+            </label>
+          </div>
+          <table className="min-w-[720px] text-sm">
             <thead>
               <tr className="text-left border-b">
                 <th className="py-2 pr-4">Date</th>
                 <th className="py-2 pr-4">Amount</th>
                 <th className="py-2 pr-4">Method</th>
                 <th className="py-2 pr-4">Note</th>
+                <th className="py-2 pr-4">By</th>
+                <th className="py-2 pr-4">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {deposits.map((d) => (
-                <tr key={d.id} className="border-b last:border-b-0">
-                  <td className="py-2 pr-4">{fmtDate(d.date)}</td>
-                  <td className="py-2 pr-4">{Number(d.amount || 0).toFixed(2)}</td>
-                  <td className="py-2 pr-4">{d.method ?? ""}</td>
-                  <td className="py-2 pr-4">{d.note ?? ""}</td>
-                </tr>
-              ))}
+              {deposits
+                .filter(d => showDeletedDeposits || !d.deleted)
+                .map((d) => {
+                  const edited = !!d.updatedAt && !d.deleted;
+                  const rowClass = d.deleted
+                    ? "opacity-60 line-through"
+                    : edited
+                    ? "bg-yellow-50"
+                    : "";
+                  const creator =
+                    d.createdByName || d.createdByEmail || (d.createdByUid ? `uid:${d.createdByUid}` : "");
+                  const editor =
+                    d.updatedByName || d.updatedByEmail || (d.updatedByUid ? `uid:${d.updatedByUid}` : "");
+
+                  if (editingDeposit?.id === d.id) {
+                    return (
+                      <tr key={d.id} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4">
+                          <input
+                            type="date"
+                            defaultValue={isoDate(d.date)}
+                            onChange={(e) =>
+                              setEditingDeposit({
+                                ...editingDeposit,
+                                date: Timestamp.fromDate(new Date(`${e.target.value}T00:00:00`)),
+                              })
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            type="number"
+                            step="0.01"
+                            defaultValue={String(d.amount)}
+                            onChange={(e) =>
+                              setEditingDeposit({ ...editingDeposit, amount: Number(e.target.value || 0) })
+                            }
+                            className="border px-2 py-1 rounded w-28"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={d.method || ""}
+                            onChange={(e) =>
+                              setEditingDeposit({ ...editingDeposit, method: e.target.value })
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={d.note || ""}
+                            onChange={(e) =>
+                              setEditingDeposit({ ...editingDeposit, note: e.target.value })
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                            edit…
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4 space-x-2">
+                          <button className="underline" onClick={onEditDepositSave}>Save</button>
+                          <button className="underline" onClick={() => setEditingDeposit(null)}>Cancel</button>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr key={d.id} className={`border-b last:border-b-0 ${rowClass}`}>
+                      <td className="py-2 pr-4">{fmtDate(d.date)}</td>
+                      <td className="py-2 pr-4">{Number(d.amount || 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4">{d.method ?? ""}</td>
+                      <td className="py-2 pr-4">{d.note ?? ""}</td>
+                      <td className="py-2 pr-4 text-xs">
+                        <span
+                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
+                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+                        >
+                          {creator || "—"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 space-x-3">
+                        {!d.deleted && (
+                          <>
+                            <button className="underline" onClick={() => setEditingDeposit(d)}>Edit</button>
+                            <button className="underline text-red-700" onClick={() => onDeleteDeposit(d.id)}>Delete</button>
+                          </>
+                        )}
+                        {d.deleted && <span className="text-xs">deleted</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
       </section>
 
-      {/* Audit & denominations */}
-      <section className="mb-8">
-        <h2 className="text-xl font-semibold mb-2">Petty cash audit &amp; denominations</h2>
+      {/* Audit & denominations (collapsible) */}
+      <section className="rounded-lg border bg-white p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Petty cash audit &amp; denominations</h2>
+          <button
+            type="button"
+            className="text-sm underline"
+            onClick={() => setShowAudit(v => !v)}
+            aria-expanded={showAudit}
+          >
+            {showAudit ? "Hide ▲" : "Tools ▾"}
+          </button>
+        </div>
 
-        <form onSubmit={onSaveAudit} className="grid grid-cols-7 gap-3 max-w-5xl items-end">
-          <div className="col-span-2">
-            <label className="block text-sm mb-1">Date</label>
-            <input
-              type="date"
-              value={auditDate}
-              onChange={(e) => setAuditDate(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              required
-            />
-          </div>
+        {showAudit && (
+          <>
+            <form onSubmit={onSaveAudit} className="mt-4 grid grid-cols-7 gap-3 max-w-5xl items-end">
+              <div className="col-span-2">
+                <label className="block text-sm mb-1">Date</label>
+                <input
+                  type="date"
+                  value={auditDate}
+                  onChange={(e) => setAuditDate(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                  required
+                />
+              </div>
 
-          <div>
-            <label className="block text-xs mb-1">$5 count</label>
-            <input
-              type="number"
-              min="0"
-              value={n5}
-              onChange={(e) => setN5(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs mb-1">$10 count</label>
-            <input
-              type="number"
-              min="0"
-              value={n10}
-              onChange={(e) => setN10(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs mb-1">$20 count</label>
-            <input
-              type="number"
-              min="0"
-              value={n20}
-              onChange={(e) => setN20(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs mb-1">$50 count</label>
-            <input
-              type="number"
-              min="0"
-              value={n50}
-              onChange={(e) => setN50(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs mb-1">$100 count</label>
-            <input
-              type="number"
-              min="0"
-              value={n100}
-              onChange={(e) => setN100(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
+              <div>
+                <label className="block text-xs mb-1">$5 count</label>
+                <input type="number" min="0" value={n5}  onChange={(e) => setN5(e.target.value)}  className="border px-3 py-2 rounded w-full" />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">$10 count</label>
+                <input type="number" min="0" value={n10} onChange={(e) => setN10(e.target.value)} className="border px-3 py-2 rounded w-full" />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">$20 count</label>
+                <input type="number" min="0" value={n20} onChange={(e) => setN20(e.target.value)} className="border px-3 py-2 rounded w-full" />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">$50 count</label>
+                <input type="number" min="0" value={n50} onChange={(e) => setN50(e.target.value)} className="border px-3 py-2 rounded w-full" />
+              </div>
+              <div>
+                <label className="block text-xs mb-1">$100 count</label>
+                <input type="number" min="0" value={n100} onChange={(e) => setN100(e.target.value)} className="border px-3 py-2 rounded w-full" />
+              </div>
 
-          <div className="col-span-2">
-            <label className="block text-sm mb-1">Change ($)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={chg}
-              onChange={(e) => setChg(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-            />
-          </div>
+              <div className="col-span-2">
+                <label className="block text-sm mb-1">Change ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={chg}
+                  onChange={(e) => setChg(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                />
+              </div>
 
-          <div className="col-span-3 text-sm">
-            <div>
-              Counted total: <strong>${counted.toFixed(2)}</strong>
-            </div>
-            <div className={variance === 0 ? "" : variance > 0 ? "text-green-700" : "text-red-700"}>
-              Variance vs projected closing:{" "}
-              <strong>
-                {variance >= 0 ? "+" : ""}${variance.toFixed(2)}
-              </strong>
-            </div>
-          </div>
+              <div className="col-span-3 text-sm">
+                <div>
+                  Counted total: <strong>${counted.toFixed(2)}</strong>
+                </div>
+                <div className={variance === 0 ? "" : variance > 0 ? "text-green-700" : "text-red-700"}>
+                  Variance vs projected closing:{" "}
+                  <strong>{variance >= 0 ? "+" : ""}${variance.toFixed(2)}</strong>
+                </div>
+              </div>
 
-          <div className="col-span-2">
-            <button className="border px-4 py-2 rounded">Save audit</button>
-          </div>
-        </form>
+              <div className="col-span-2">
+                <button className="border px-4 py-2 rounded">Save audit</button>
+              </div>
+            </form>
 
-        {/* Recent audits */}
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[560px] text-sm">
-            <thead>
-              <tr className="text-left border-b">
-                <th className="py-2 pr-4">Date</th>
-                <th className="py-2 pr-4">Counted total</th>
-                <th className="py-2 pr-4">Variance (vs closing at time)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audits.slice(-5).map((a) => {
-                const dt = a.date?.toDate?.() ?? new Date();
-                const v = (Number(a.total || 0) - closing).toFixed(2);
-                return (
-                  <tr key={a.id} className="border-b last:border-b-0">
-                    <td className="py-2 pr-4">{dt.toLocaleDateString("en-CA")}</td>
-                    <td className="py-2 pr-4">${Number(a.total || 0).toFixed(2)}</td>
-                    <td className="py-2 pr-4">{v}</td>
+            {/* Recent audits */}
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-[560px] text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 pr-4">Counted total</th>
+                    <th className="py-2 pr-4">Variance (vs closing at time)</th>
+                    <th className="py-2 pr-4">Actions</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                </thead>
+                <tbody>
+                  {audits
+                    .filter(a => !a.deleted)      // hide deleted by default
+                    .slice(-5)
+                    .map((a) => {
+                      const dt = a.date?.toDate?.() ?? new Date();
+                      const v = (Number(a.total || 0) - closing).toFixed(2);
+                      return (
+                        <tr key={a.id} className="border-b last:border-b-0">
+                          <td className="py-2 pr-4">{dt.toLocaleDateString("en-CA")}</td>
+                          <td className="py-2 pr-4">${Number(a.total || 0).toFixed(2)}</td>
+                          <td className="py-2 pr-4">{v}</td>
+                          <td className="py-2 pr-4">
+                            <button
+                              type="button"
+                              className="text-red-600 hover:underline"
+                              onClick={() => onDeleteAudit(a)}
+                              title={
+                                a.createdByName
+                                  ? `Created by ${a.createdByName}${a.createdByEmail ? ` (${a.createdByEmail})` : ""}`
+                                  : "Delete audit"
+                              }
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
 
-      {/* Next widgets */}
-      <section className="opacity-70">
-        <h2 className="text-xl font-semibold mb-2">More admin widgets (next)</h2>
-        <ul className="list-disc ml-6 text-sm">
-          <li>Petty cash audit &amp; bill denominations calculator</li>
-        </ul>
+              </table>
+            </div>
+          </>
+        )}
       </section>
     </main>
   );

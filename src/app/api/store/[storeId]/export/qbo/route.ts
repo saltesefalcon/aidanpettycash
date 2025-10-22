@@ -1,12 +1,14 @@
-// src/app/api/store/[storeId]/qbo-export/route.ts
+// src/app/api/stores/[storeId]/export/qbo/route.ts
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";               // ← ADMIN SDK
-import { Timestamp } from "firebase-admin/firestore";        // ← ADMIN Timestamp
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { buildQboCsv } from "@/lib/export/qbo";
 
+// Node runtime + no caching
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Keep in sync with your template's Accounts tab
 const ALLOWED_ACCOUNTS = new Set<string>([
   "5110 Purchases:Beer Purchases",
   "5120 Purchases:Food Purchases",
@@ -19,12 +21,13 @@ const ALLOWED_ACCOUNTS = new Set<string>([
   "1050 Petty Cash",
 ]);
 
+// Optional ASCII sanitizer (for Excel edge-cases or legacy tools)
 function toAscii(s: string) {
   return s
-    .replace(/\u2013|\u2014/g, "-")
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
-    .replace(/\u00A0/g, " ");
+    .replace(/\u2013|\u2014/g, "-")  // en/em dash → hyphen
+    .replace(/[\u2018\u2019]/g, "'") // smart single quotes → straight
+    .replace(/[\u201C\u201D]/g, '"') // smart double quotes → straight
+    .replace(/\u00A0/g, " ");        // nbsp → space
 }
 
 export async function GET(req: Request, { params }: { params: { storeId: string } }) {
@@ -32,8 +35,8 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
   const url = new URL(req.url);
 
   const from = url.searchParams.get("from");
-  const to   = url.searchParams.get("to");
-  const jn   = url.searchParams.get("jn") ?? "";
+  const to = url.searchParams.get("to");
+  const jn = url.searchParams.get("jn") ?? "";
   const includeCashIns = url.searchParams.get("includeCashIns") === "1";
   const cashInCreditAccount = url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
 
@@ -47,6 +50,7 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
     return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
+  // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
     const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
@@ -62,30 +66,34 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
     const endTs   = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
-    // === ENTRIES (Admin SDK) ===
-    const entRef  = adminDb.collection("stores").doc(storeId).collection("entries");
-    const entSnap = await entRef
-      .where("date", ">=", startTs)
-      .where("date", "<=", endTs)
-      .get();
-    const entries = entSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-    entries.sort((a: any, b: any) =>
-      ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
-      ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
+    // entries
+    const entQ = query(
+      collection(db, "stores", storeId, "entries"),
+      where("date", ">=", startTs),
+      where("date", "<=", endTs),
     );
-
-    // === Optional CASH-INS (Admin SDK) ===
-    let cashins: any[] = [];
-    if (includeCashIns) {
-      const ciRef  = adminDb.collection("stores").doc(storeId).collection("cashins");
-      const ciSnap = await ciRef
-        .where("date", ">=", startTs)
-        .where("date", "<=", endTs)
-        .get();
-      cashins = ciSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-      cashins.sort((a: any, b: any) =>
+    const entSnap = await getDocs(entQ);
+    const entries = entSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    entries.sort(
+      (a: any, b: any) =>
         ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
         ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
+    );
+
+    // optional cash-ins
+    let cashins: any[] = [];
+    if (includeCashIns) {
+      const ciQ = query(
+        collection(db, "stores", storeId, "cashins"),
+        where("date", ">=", startTs),
+        where("date", "<=", endTs),
+      );
+      const ciSnap = await getDocs(ciQ);
+      cashins = ciSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      cashins.sort(
+        (a: any, b: any) =>
+          ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
+          ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
       );
     }
 
@@ -101,7 +109,7 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date: e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
+            date: e.date?.toDate?.()?.toISOString?.()?.slice(0,10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
@@ -129,6 +137,7 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
       });
       const csv = ascii ? toAscii(csv0) : csv0;
       const lines = csv.split(/\r?\n/).filter(Boolean);
+      const sample = lines.slice(0, 3);
       const cols = (line: string) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
       let deb = 0, cred = 0;
       for (const line of lines) {
@@ -140,12 +149,8 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
       return NextResponse.json({
         ok: true,
         stage: "csv.preview",
-        sample: lines.slice(0, 3),
-        totals: {
-          debits: Number(deb.toFixed(2)),
-          credits: Number(cred.toFixed(2)),
-          balanced: Math.abs(deb - cred) < 0.01,
-        },
+        sample,
+        totals: { debits: Number(deb.toFixed(2)), credits: Number(cred.toFixed(2)), balanced: Math.abs(deb-cred) < 0.01 },
       });
     }
 
@@ -156,6 +161,7 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
     });
     const csv = ascii ? toAscii(csv0) : csv0;
 
+    // Add UTF-8 BOM so Excel detects Unicode
     const BOM = "\uFEFF";
     return new NextResponse(BOM + csv, {
       headers: {
