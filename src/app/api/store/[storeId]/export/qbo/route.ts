@@ -1,14 +1,12 @@
-// src/app/api/stores/[storeId]/export/qbo/route.ts
+// src/app/api/store/[storeId]/export/qbo/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { buildQboCsv } from "@/lib/export/qbo";
 
-// Node runtime + no caching
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Keep in sync with your template's Accounts tab
 const ALLOWED_ACCOUNTS = new Set<string>([
   "5110 Purchases:Beer Purchases",
   "5120 Purchases:Food Purchases",
@@ -21,7 +19,6 @@ const ALLOWED_ACCOUNTS = new Set<string>([
   "1050 Petty Cash",
 ]);
 
-// Optional ASCII sanitizer (for Excel edge-cases or legacy tools)
 function toAscii(s: string) {
   return s
     .replace(/\u2013|\u2014/g, "-")  // en/em dash → hyphen
@@ -30,8 +27,11 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");        // nbsp → space
 }
 
-export async function GET(req: Request, { params }: { params: { storeId: string } }) {
-  const { storeId } = params;
+export async function GET(
+  req: Request,
+  context: { params: { storeId: string } }
+) {
+  const { storeId } = context.params;
   const url = new URL(req.url);
 
   const from = url.searchParams.get("from");
@@ -137,7 +137,6 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
       });
       const csv = ascii ? toAscii(csv0) : csv0;
       const lines = csv.split(/\r?\n/).filter(Boolean);
-      const sample = lines.slice(0, 3);
       const cols = (line: string) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
       let deb = 0, cred = 0;
       for (const line of lines) {
@@ -149,8 +148,12 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
       return NextResponse.json({
         ok: true,
         stage: "csv.preview",
-        sample,
-        totals: { debits: Number(deb.toFixed(2)), credits: Number(cred.toFixed(2)), balanced: Math.abs(deb-cred) < 0.01 },
+        sample: lines.slice(0, 3),
+        totals: {
+          debits: Number(deb.toFixed(2)),
+          credits: Number(cred.toFixed(2)),
+          balanced: Math.abs(deb - cred) < 0.01,
+        },
       });
     }
 
@@ -161,7 +164,6 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
     });
     const csv = ascii ? toAscii(csv0) : csv0;
 
-    // Add UTF-8 BOM so Excel detects Unicode
     const BOM = "\uFEFF";
     return new NextResponse(BOM + csv, {
       headers: {
@@ -179,3 +181,4 @@ export async function GET(req: Request, { params }: { params: { storeId: string 
     return new NextResponse(msg, { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 }
+
