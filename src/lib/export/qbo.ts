@@ -12,7 +12,7 @@ export type Entry = {
   type?: string;     // optional tag (FOH/BOH/etc)
   account?: string;  // target expense account name (must match allowed accounts)
   vendor?: string;
-  description?: string;
+  description?: string; // "Description of order"
 };
 
 export type CashIn = {
@@ -53,6 +53,19 @@ function toYMD(d: any): string {
   }
 }
 
+// --- Helpers for CSV Description text ---
+// Trim long descriptions so we don't create giant CSV cells.
+const truncate = (s: string, max = 350) =>
+  s && s.length > max ? s.slice(0, max - 1) + "…" : s;
+
+// Build "Department - Description of order" from an entry.
+// We accept dept from multiple possible fields: dept | type | department.
+const entryToDesc = (e: any) => {
+  const dept = (e.dept ?? e.type ?? e.department ?? "").toString().trim();
+  const text = (e.description ?? e.desc ?? "").toString().trim();
+  return [dept, text].filter(Boolean).join(" - ");
+};
+
 type BuildArgs = {
   entries: Entry[];
   cashins: CashIn[];               // currently unused in JE build unless includeCashIns provided
@@ -76,7 +89,7 @@ export function buildQboCsv({
 }: BuildArgs): string {
   // --- Validate & normalize entries ---
   const byAccount = new Map<string, {
-    debit: number; tax: number; memoPieces: string[];
+    debit: number; tax: number; descPieces: string[];
   }>();
 
   for (const e of entries || []) {
@@ -93,15 +106,15 @@ export function buildQboCsv({
     }
 
     if (!byAccount.has(acct)) {
-      byAccount.set(acct, { debit: 0, tax: 0, memoPieces: [] });
+      byAccount.set(acct, { debit: 0, tax: 0, descPieces: [] });
     }
     const acc = byAccount.get(acct)!;
     acc.debit += gross;
     acc.tax += tax;
 
-    const dstr = e.date ? toYMD(e.date) : "";
-    const piece = [dstr, e.vendor, e.description].filter(Boolean).join(" ");
-    if (piece) acc.memoPieces.push(piece);
+    // Collect "Dept - Description of order" for this entry
+    const desc = entryToDesc(e);
+    if (desc) acc.descPieces.push(desc);
   }
 
   // --- Optional cash-ins handling could go here if needed later ---
@@ -119,22 +132,24 @@ export function buildQboCsv({
     // If an account aggregated negative (e.g., rebates), flip to a CREDIT line
     const sum = Number(agg.debit.toFixed(2));
     const tax = Number(agg.tax.toFixed(2));
-    const memo = agg.memoPieces.length
-      ? `${storeId} petty cash — ${acct} (${agg.memoPieces.length} items)`
-      : `${storeId} petty cash — ${acct} total`;
+
+    // Build Description = joined "Dept - Description" pieces; fallback to generic if empty
+    const description = agg.descPieces.length
+      ? truncate(agg.descPieces.join("; "))
+      : `${storeId} petty cash — ${acct} (${agg.descPieces.length || 0} items)`;
 
     if (sum >= 0) {
-      push([journalNo, journalDate, acct, sum.toFixed(2), "", memo, "", tax ? tax.toFixed(2) : "0.00"]);
+      push([journalNo, journalDate, acct, sum.toFixed(2), "", description, "", tax ? tax.toFixed(2) : "0.00"]);
       totalDebits += sum;
     } else {
       // negative -> credit this account
-      push([journalNo, journalDate, acct, "", Math.abs(sum).toFixed(2), memo, "", "0.00"]);
+      push([journalNo, journalDate, acct, "", Math.abs(sum).toFixed(2), description, "", "0.00"]);
       // credits reduce the petty-cash credit later
       totalDebits += sum; // sum is negative
     }
   }
 
-  // Single petty cash offset line (bonus line you asked for)
+  // Single petty cash offset line
   const pettyCashCredit = Number(Math.abs(totalDebits).toFixed(2));
   if (totalDebits !== 0) {
     // If totalDebits > 0, we credit petty cash; if < 0 (overall rebate), we debit petty cash.
