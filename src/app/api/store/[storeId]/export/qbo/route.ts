@@ -30,32 +30,37 @@ function toAscii(s: string) {
 }
 
 export async function GET(req: Request) {
-  // 🔹 No ctx arg — derive storeId from the URL path
+  // derive storeId from the URL path
   const url = new URL(req.url);
   const parts = url.pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","export","qbo"]
-  const i = parts.findIndex(p => p === "store");
+  const i = parts.findIndex((p) => p === "store");
   const storeId = i >= 0 ? parts[i + 1] : "";
 
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const jn = url.searchParams.get("jn") ?? "";
   const includeCashIns = url.searchParams.get("includeCashIns") === "1";
-  const cashInCreditAccount = url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
+  const cashInCreditAccount =
+    url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
 
-  const debug   = url.searchParams.get("debug") === "1";
-  const smoke   = url.searchParams.get("smoke") === "1";
+  const debug = url.searchParams.get("debug") === "1";
+  const smoke = url.searchParams.get("smoke") === "1";
   const preview = url.searchParams.get("preview") === "1";
-  const audit   = url.searchParams.get("audit") === "1";
-  const ascii   = url.searchParams.get("ascii") === "1";
+  const audit = url.searchParams.get("audit") === "1";
+  const ascii = url.searchParams.get("ascii") === "1";
 
   if (!storeId || !from || !to) {
-    return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Missing storeId/from/to" },
+      { status: 400 }
+    );
   }
 
   // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
-    const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
+    const sample =
+      "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
     return new NextResponse(BOM + sample, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -66,16 +71,16 @@ export async function GET(req: Request) {
 
   try {
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
-    const endTs   = Timestamp.fromDate(new Date(`${to}T23:59:59`));
+    const endTs = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
     // entries
     const entQ = query(
       collection(db, "stores", storeId, "entries"),
       where("date", ">=", startTs),
-      where("date", "<=", endTs),
+      where("date", "<=", endTs)
     );
     const entSnap = await getDocs(entQ);
-    const entries = entSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    const entries = entSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
     entries.sort(
       (a: any, b: any) =>
         ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
@@ -88,10 +93,10 @@ export async function GET(req: Request) {
       const ciQ = query(
         collection(db, "stores", storeId, "cashins"),
         where("date", ">=", startTs),
-        where("date", "<=", endTs),
+        where("date", "<=", endTs)
       );
       const ciSnap = await getDocs(ciQ);
-      cashins = ciSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      cashins = ciSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
       cashins.sort(
         (a: any, b: any) =>
           ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
@@ -111,7 +116,8 @@ export async function GET(req: Request) {
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date: e.date?.toDate?.()?.toISOString?.()?.slice(0,10) ?? null,
+            date:
+              e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
@@ -125,7 +131,11 @@ export async function GET(req: Request) {
         ok: true,
         stage: "audit",
         range: { from, to },
-        counts: { entries: entries.length, uniqueAccounts: used.size, invalid: invalid.length },
+        counts: {
+          entries: entries.length,
+          uniqueAccounts: used.size,
+          invalid: invalid.length,
+        },
         uniqueAccountsUsed: Array.from(used).sort(),
         invalid,
       });
@@ -134,13 +144,20 @@ export async function GET(req: Request) {
     // === DEBUG PREVIEW (first lines + totals) ===
     if (debug && preview) {
       const csv0 = buildQboCsv({
-        entries, cashins, includeCashIns, cashInCreditAccount,
-        storeId, journalNo: jn, journalDate: to!,
+        entries,
+        cashins,
+        includeCashIns,
+        cashInCreditAccount,
+        storeId,
+        journalNo: jn,
+        journalDate: to!,
       });
       const csv = ascii ? toAscii(csv0) : csv0;
       const lines = csv.split(/\r?\n/).filter(Boolean);
-      const cols = (line: string) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
-      let deb = 0, cred = 0;
+      const cols = (line: string) =>
+        line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
+      let deb = 0,
+        cred = 0;
       for (const line of lines) {
         if (line.startsWith("JournalNo")) continue;
         const c = cols(line);
@@ -161,8 +178,13 @@ export async function GET(req: Request) {
 
     // === REAL CSV DOWNLOAD ===
     const csv0 = buildQboCsv({
-      entries, cashins, includeCashIns, cashInCreditAccount,
-      storeId, journalNo: jn, journalDate: to!,
+      entries,
+      cashins,
+      includeCashIns,
+      cashInCreditAccount,
+      storeId,
+      journalNo: jn,
+      journalDate: to!,
     });
     const csv = ascii ? toAscii(csv0) : csv0;
 
@@ -174,12 +196,20 @@ export async function GET(req: Request) {
       },
     });
   } catch (err: any) {
-    const msg = `[qbo-export] ${err?.name || "Error"}: ${err?.message || String(err)}\n${err?.stack || ""}`;
+    const msg = `[qbo-export] ${err?.name || "Error"}: ${
+      err?.message || String(err)
+    }\n${err?.stack || ""}`;
     console.error(msg);
     const isDebug = new URL(req.url).searchParams.get("debug") === "1";
     if (isDebug) {
-      return NextResponse.json({ ok: false, stage: "error", error: err?.message || String(err) }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, stage: "error", error: err?.message || String(err) },
+        { status: 400 }
+      );
     }
-    return new NextResponse(msg, { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    return new NextResponse(msg, {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   }
 }
