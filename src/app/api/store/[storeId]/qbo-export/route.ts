@@ -1,12 +1,13 @@
 // src/app/api/store/[storeId]/qbo-export/route.ts
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
-import { Timestamp } from "firebase-admin/firestore";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { buildQboCsv } from "@/lib/export/qbo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Keep in sync with your template's Accounts tab
 const ALLOWED_ACCOUNTS = new Set<string>([
   "5110 Purchases:Beer Purchases",
   "5120 Purchases:Food Purchases",
@@ -19,6 +20,7 @@ const ALLOWED_ACCOUNTS = new Set<string>([
   "1050 Petty Cash",
 ]);
 
+// Optional ASCII sanitizer (for Excel edge-cases or legacy tools)
 function toAscii(s: string) {
   return s
     .replace(/\u2013|\u2014/g, "-")
@@ -27,16 +29,26 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");
 }
 
+// --- CSV description helpers (used by qbo.ts) ---
+const truncate = (s: string, max = 350) =>
+  s.length > max ? s.slice(0, max - 1) + "…" : s;
+
+const entryToDesc = (e: any) => {
+  const dept = (e.dept ?? e.type ?? e.department ?? "").toString().trim();
+  const text = (e.description ?? e.desc ?? "").toString().trim();
+  return [dept, text].filter(Boolean).join(" - ");
+};
+
 export async function GET(req: Request) {
-  // ---- NEW: derive storeId from the URL path ----
+  // derive storeId from URL
   const url = new URL(req.url);
-  const parts = url.pathname.split("/").filter(Boolean);
-  const i = parts.findIndex((p) => p === "store");
+  const parts = url.pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","qbo-export"]
+  const i = parts.findIndex(p => p === "store");
   const storeId = i >= 0 ? parts[i + 1] : "";
 
   const from = url.searchParams.get("from");
-  const to   = url.searchParams.get("to");
-  const jn   = url.searchParams.get("jn") ?? "";
+  const to = url.searchParams.get("to");
+  const jn = url.searchParams.get("jn") ?? "";
   const includeCashIns = url.searchParams.get("includeCashIns") === "1";
   const cashInCreditAccount = url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
 
@@ -50,6 +62,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
+  // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
     const sample = "JournalNo,JournalDate,AccountName,Debits,Credits,Description,Name,Sales Tax\r\n";
@@ -65,28 +78,59 @@ export async function GET(req: Request) {
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
     const endTs   = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
-    // ENTRIES
-    const entRef  = adminDb.collection("stores").doc(storeId).collection("entries");
-    const entSnap = await entRef.where("date", ">=", startTs).where("date", "<=", endTs).get();
-    const entries = entSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-    entries.sort((a: any, b: any) =>
-      ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
-      ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
+    // entries in range
+    const entQ = query(
+      collection(db, "stores", storeId, "entries"),
+      where("date", ">=", startTs),
+      where("date", "<=", endTs),
     );
-
-    // Optional CASH-INS
-    let cashins: any[] = [];
-    if (includeCashIns) {
-      const ciRef  = adminDb.collection("stores").doc(storeId).collection("cashins");
-      const ciSnap = await ciRef.where("date", ">=", startTs).where("date", "<=", endTs).get();
-      cashins = ciSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-      cashins.sort((a: any, b: any) =>
+    const entSnap = await getDocs(entQ);
+    const entries = entSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    entries.sort(
+      (a: any, b: any) =>
         ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
         ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
+    );
+
+    // ── NEW: resolve account ids -> names for legacy entries ─────────
+    // Some older entries saved e.account as the account document id.
+    // We load /stores/{storeId}/accounts and replace ids with their names.
+    const accSnap = await getDocs(collection(db, "stores", storeId, "accounts"));
+    const idToName = new Map<string, string>();
+    accSnap.forEach(docSnap => {
+      const a = docSnap.data() as any;
+      // prefer a.name (should match “5110 Purchases:Beer Purchases” etc.)
+      const name =
+        (a?.name ?? a?.qboName ?? a?.fullName ?? a?.path ?? "").toString().trim();
+      if (name) idToName.set(docSnap.id, name);
+    });
+
+    for (const e of entries) {
+      const acct = (e.account ?? "").toString().trim();
+      if (acct && !ALLOWED_ACCOUNTS.has(acct) && idToName.has(acct)) {
+        e.account = idToName.get(acct);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────
+
+    // optional cash-ins
+    let cashins: any[] = [];
+    if (includeCashIns) {
+      const ciQ = query(
+        collection(db, "stores", storeId, "cashins"),
+        where("date", ">=", startTs),
+        where("date", "<=", endTs),
+      );
+      const ciSnap = await getDocs(ciQ);
+      cashins = ciSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      cashins.sort(
+        (a: any, b: any) =>
+          ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
+          ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
       );
     }
 
-    // AUDIT
+    // === AUDIT MODE (JSON) ===
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
@@ -98,7 +142,7 @@ export async function GET(req: Request) {
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date: e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
+            date: e.date?.toDate?.()?.toISOString?.()?.slice(0,10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
@@ -118,7 +162,7 @@ export async function GET(req: Request) {
       });
     }
 
-    // PREVIEW
+    // === DEBUG PREVIEW (first lines + totals) ===
     if (debug && preview) {
       const csv0 = buildQboCsv({
         entries, cashins, includeCashIns, cashInCreditAccount,
@@ -146,7 +190,7 @@ export async function GET(req: Request) {
       });
     }
 
-    // REAL CSV
+    // === REAL CSV DOWNLOAD ===
     const csv0 = buildQboCsv({
       entries, cashins, includeCashIns, cashInCreditAccount,
       storeId, journalNo: jn, journalDate: to!,
@@ -170,5 +214,6 @@ export async function GET(req: Request) {
     return new NextResponse(msg, { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 }
+
 
 
