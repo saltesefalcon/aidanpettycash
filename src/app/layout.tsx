@@ -3,11 +3,6 @@ import React from "react";
 import "./globals.css";
 import TopBar from "@/components/TopBar";
 
-export const metadata: Metadata = {
-  title: "Aidan Petty Cash",
-  description: "Petty cash tracker",
-};
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
@@ -18,4 +13,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
 
