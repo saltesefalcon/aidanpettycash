@@ -1,51 +1,14 @@
-import React from "react";
-import Link from "next/link";
-import { Suspense } from "react";
-import StoreSwitch from "@/components/StoreSwitch";
+import './globals.css';
+import type { ReactNode } from 'react';
 
-export default async function StoreLayout({
-  children,
-  params,
-}: {
-  children: React.ReactNode;
-  params: Promise<{ storeId: string }>;
-}) {
-  const { storeId } = await params;
-
-  const NavLink = ({
-    href,
-    children,
-  }: {
-    href: string;
-    children: React.ReactNode;
-  }) => (
-    <Link href={href} className="text-sm hover:underline">
-      {children}
-    </Link>
-  );
-
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <Suspense fallback={null}>
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-center gap-3 justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="text-sm hover:underline">
-              ← Stores
-            </Link>
-            <StoreSwitch currentId={storeId} />
-          </div>
-
-          <nav className="flex items-center gap-4">
-            <NavLink href={`/store/${storeId}/entries`}>Entries</NavLink>
-            <NavLink href={`/store/${storeId}/qbo-export`}>QBO Export</NavLink>
-            <NavLink href={`/store/${storeId}/settings`}>Settings</NavLink>
-            <NavLink href={`/store/${storeId}/admin`}>Admin</NavLink>
-          </nav>
-        </div>
-
+    <html lang="en">
+      <body className="min-h-screen bg-slate-50 text-slate-800 antialiased">
         {children}
-      </div>
-    </Suspense>
+      </body>
+    </html>
   );
 }
+
 
