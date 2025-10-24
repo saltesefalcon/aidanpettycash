@@ -29,14 +29,13 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");
 }
 
-// NOTE: second arg typed inline per Next.js requirement
-export async function GET(
-  req: Request,
-  { params }: { params: { storeId: string } }
-) {
-  const { storeId } = params;
-
+export async function GET(req: Request) {
+  // Derive storeId from the URL (avoids Next.js type constraints on arg2)
   const url = new URL(req.url);
+  const parts = url.pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","qbo-export"]
+  const i = parts.findIndex((p) => p === "store");
+  const storeId = i >= 0 ? parts[i + 1] : "";
+
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const journalNo = url.searchParams.get("jn") ?? "";
@@ -69,7 +68,7 @@ export async function GET(
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
     const endTs = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
-    // --- load accounts (id -> name) to resolve entries that saved accountId/doc id ---
+    // Load accounts (id -> name) so entries that stored an account *id* can be mapped to the display name
     const acctSnap = await getDocs(collection(db, "stores", storeId, "accounts"));
     const accountIdToName = new Map<string, string>();
     acctSnap.forEach((d) => {
@@ -81,7 +80,7 @@ export async function GET(
       if (name) accountIdToName.set(d.id, name);
     });
 
-    // --- entries ---
+    // Entries
     const entQ = query(
       collection(db, "stores", storeId, "entries"),
       where("date", ">=", startTs),
@@ -90,7 +89,7 @@ export async function GET(
     const entSnap = await getDocs(entQ);
     let entries = entSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 
-    // Resolve account IDs/docIds to real names if needed
+    // Resolve account field to an allowed *name*
     entries = entries.map((e: any) => {
       let acc: string =
         (e.account as string) ||
@@ -113,7 +112,7 @@ export async function GET(
         ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
     );
 
-    // --- optional cash-ins ---
+    // Optional cash-ins
     let cashins: any[] = [];
     if (includeCashIns) {
       const ciQ = query(
@@ -130,7 +129,7 @@ export async function GET(
       );
     }
 
-    // --- AUDIT mode ---
+    // AUDIT mode
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
@@ -148,7 +147,7 @@ export async function GET(
             account: acct || null,
             reason: pettyOnExpenseLine
               ? "Expense line cannot use 1050 Petty Cash"
-              : "Account not in allowed Accounts list (resolve your account IDs to names)",
+              : "Account not in allowed list (resolve account IDs to names)",
           });
         }
       }
@@ -162,7 +161,7 @@ export async function GET(
       });
     }
 
-    // --- DEBUG preview ---
+    // DEBUG preview
     if (debug && preview) {
       const csv0 = buildQboCsv({
         entries,
@@ -196,7 +195,7 @@ export async function GET(
       });
     }
 
-    // --- REAL CSV ---
+    // REAL CSV
     const csv0 = buildQboCsv({
       entries,
       cashins,
@@ -228,4 +227,5 @@ export async function GET(
     });
   }
 }
+
 
