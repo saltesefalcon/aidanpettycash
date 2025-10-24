@@ -1,13 +1,7 @@
 // src/app/api/store/[storeId]/qbo-export/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  Timestamp,
-} from "firebase/firestore";
+import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { buildQboCsv } from "@/lib/export/qbo";
 
 export const runtime = "nodejs";
@@ -35,9 +29,11 @@ function toAscii(s: string) {
     .replace(/\u00A0/g, " ");
 }
 
-type Ctx = { params: { storeId: string } };
-
-export async function GET(req: Request, { params }: Ctx) {
+// NOTE: second arg typed inline per Next.js requirement
+export async function GET(
+  req: Request,
+  { params }: { params: { storeId: string } }
+) {
   const { storeId } = params;
 
   const url = new URL(req.url);
@@ -45,8 +41,7 @@ export async function GET(req: Request, { params }: Ctx) {
   const to = url.searchParams.get("to");
   const journalNo = url.searchParams.get("jn") ?? "";
   const includeCashIns = url.searchParams.get("includeCashIns") === "1";
-  const cashInCreditAccount =
-    url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
+  const cashInCreditAccount = url.searchParams.get("cashInCreditAccount") ?? "1000 Bank";
 
   const debug = url.searchParams.get("debug") === "1";
   const preview = url.searchParams.get("preview") === "1";
@@ -55,17 +50,13 @@ export async function GET(req: Request, { params }: Ctx) {
   const ascii = url.searchParams.get("ascii") === "1";
 
   if (!storeId || !from || !to) {
-    return NextResponse.json(
-      { ok: false, error: "Missing storeId/from/to" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: "Missing storeId/from/to" }, { status: 400 });
   }
 
   // Smoke CSV (no Firestore)
   if (smoke) {
     const BOM = "\uFEFF";
-    const sample =
-      "*JournalNo,*JournalDate,*AccountName,*Debits,*Credits,Description,Name,Sales Tax\r\n";
+    const sample = "*JournalNo,*JournalDate,*AccountName,*Debits,*Credits,Description,Name,Sales Tax\r\n";
     return new NextResponse(BOM + sample, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -78,13 +69,10 @@ export async function GET(req: Request, { params }: Ctx) {
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
     const endTs = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
-    // -------- load accounts (id -> name) so we can resolve entries that store an accountId --------
-    const acctSnap = await getDocs(
-      collection(db, "stores", storeId, "accounts")
-    );
+    // --- load accounts (id -> name) to resolve entries that saved accountId/doc id ---
+    const acctSnap = await getDocs(collection(db, "stores", storeId, "accounts"));
     const accountIdToName = new Map<string, string>();
     acctSnap.forEach((d) => {
-      // try a few common field names
       const name =
         (d.get("name") as string) ??
         (d.get("fullName") as string) ??
@@ -93,7 +81,7 @@ export async function GET(req: Request, { params }: Ctx) {
       if (name) accountIdToName.set(d.id, name);
     });
 
-    // -------- entries --------
+    // --- entries ---
     const entQ = query(
       collection(db, "stores", storeId, "entries"),
       where("date", ">=", startTs),
@@ -102,14 +90,13 @@ export async function GET(req: Request, { params }: Ctx) {
     const entSnap = await getDocs(entQ);
     let entries = entSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 
-    // Resolve account IDs -> names (handles stores that saved accountId instead of the textual name)
+    // Resolve account IDs/docIds to real names if needed
     entries = entries.map((e: any) => {
       let acc: string =
         (e.account as string) ||
         (e.accountName as string) ||
         accountIdToName.get(e.accountId) ||
         "";
-      // If the saved "account" value looks like a doc id and maps to a known account, swap it
       if (acc && !ALLOWED_ACCOUNTS.has(acc)) {
         const mapped =
           accountIdToName.get(acc) ||
@@ -126,7 +113,7 @@ export async function GET(req: Request, { params }: Ctx) {
         ((b.date?.toDate?.() as Date | undefined)?.getTime() ?? 0)
     );
 
-    // -------- optional cash-ins --------
+    // --- optional cash-ins ---
     let cashins: any[] = [];
     if (includeCashIns) {
       const ciQ = query(
@@ -143,7 +130,7 @@ export async function GET(req: Request, { params }: Ctx) {
       );
     }
 
-    // -------- AUDIT mode (validate accounts etc.) --------
+    // --- AUDIT mode ---
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
@@ -155,8 +142,7 @@ export async function GET(req: Request, { params }: Ctx) {
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date:
-              e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
+            date: e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
@@ -170,17 +156,13 @@ export async function GET(req: Request, { params }: Ctx) {
         ok: true,
         stage: "audit",
         range: { from, to },
-        counts: {
-          entries: entries.length,
-          uniqueAccounts: used.size,
-          invalid: invalid.length,
-        },
+        counts: { entries: entries.length, uniqueAccounts: used.size, invalid: invalid.length },
         uniqueAccountsUsed: Array.from(used).sort(),
         invalid,
       });
     }
 
-    // -------- DEBUG preview --------
+    // --- DEBUG preview ---
     if (debug && preview) {
       const csv0 = buildQboCsv({
         entries,
@@ -193,8 +175,7 @@ export async function GET(req: Request, { params }: Ctx) {
       });
       const csv = ascii ? toAscii(csv0) : csv0;
       const lines = csv.split(/\r?\n/).filter(Boolean);
-      const cols = (line: string) =>
-        line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
+      const cols = (line: string) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
       let deb = 0,
         cred = 0;
       for (const line of lines) {
@@ -215,7 +196,7 @@ export async function GET(req: Request, { params }: Ctx) {
       });
     }
 
-    // -------- REAL CSV --------
+    // --- REAL CSV ---
     const csv0 = buildQboCsv({
       entries,
       cashins,
@@ -235,16 +216,11 @@ export async function GET(req: Request, { params }: Ctx) {
       },
     });
   } catch (err: any) {
-    const msg = `[qbo-export] ${err?.name || "Error"}: ${
-      err?.message || String(err)
-    }\n${err?.stack || ""}`;
+    const msg = `[qbo-export] ${err?.name || "Error"}: ${err?.message || String(err)}\n${err?.stack || ""}`;
     console.error(msg);
     const isDebug = new URL(req.url).searchParams.get("debug") === "1";
     if (isDebug) {
-      return NextResponse.json(
-        { ok: false, stage: "error", error: err?.message || String(err) },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, stage: "error", error: err?.message || String(err) }, { status: 400 });
     }
     return new NextResponse(msg, {
       status: 500,
@@ -252,3 +228,4 @@ export async function GET(req: Request, { params }: Ctx) {
     });
   }
 }
+
