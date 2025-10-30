@@ -13,8 +13,10 @@ import {
   where,
   getDoc,
   getDocs,
+  onSnapshot,          // <-- add this
   Timestamp,
 } from "firebase/firestore";
+
 import MonthPicker from "@/components/MonthPicker";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -64,24 +66,22 @@ type Deposit = {
   deletedByEmail?: string;
 };
 
-  type Audit = {
-    id?: string;
-    date: any;
-    n5: number; n10: number; n20: number; n50: number; n100: number;
-    change: number;
-    total: number;
-    note?: string;
-    // audit metadata (optional)
-    createdAt?: any;
-    createdByUid?: string; createdByName?: string; createdByEmail?: string;
-    updatedAt?: any;
-    updatedByUid?: string; updatedByName?: string; updatedByEmail?: string;
-    deleted?: boolean;
-    deletedAt?: any;
-    deletedByUid?: string; deletedByName?: string; deletedByEmail?: string;
-    month?: string;
-  };
-
+type Audit = {
+  id?: string;
+  date: any;
+  n5: number; n10: number; n20: number; n50: number; n100: number;
+  change: number;
+  total: number;
+  note?: string;
+  createdAt?: any;
+  createdByUid?: string; createdByName?: string; createdByEmail?: string;
+  updatedAt?: any;
+  updatedByUid?: string; updatedByName?: string; updatedByEmail?: string;
+  deleted?: boolean;
+  deletedAt?: any;
+  deletedByUid?: string; deletedByName?: string; deletedByEmail?: string;
+  month?: string;
+};
 
 export default function AdminPage() {
   const { storeId } = useParams<{ storeId: string }>();
@@ -163,16 +163,17 @@ export default function AdminPage() {
     );
   }
 
-  // Helpers: today in YYYY-MM-DD and input→Timestamp
-const isoToday = () => {
-  const t = new Date();
-  const mm = String(t.getMonth() + 1).padStart(2, "0");
-  const dd = String(t.getDate()).padStart(2, "0");
-  return `${t.getFullYear()}-${mm}-${dd}`;
-};
-const toTs = (yyyyMmDd: string) =>
-  Timestamp.fromDate(new Date(`${yyyyMmDd}T00:00:00`));
-
+  // ── Helpers ───────────────────────────────────────────────────────
+  const isoToday = () => {
+    const t = new Date();
+    const mm = String(t.getMonth() + 1).padStart(2, "0");
+    const dd = String(t.getDate()).padStart(2, "0");
+    return `${t.getFullYear()}-${mm}-${dd}`;
+  };
+  const toTs = (yyyyMmDd: string) =>
+    Timestamp.fromDate(new Date(`${yyyyMmDd}T00:00:00`));
+  // Safe getTime helper (works for Firestore Timestamps)
+  const getTime = (val: any) => (val?.toDate ? val.toDate().getTime() : 0);
 
   // ── Opening balance state ──────────────────────────────────────────
   const [openingAmt, setOpeningAmt] = useState<string>("");
@@ -180,16 +181,14 @@ const toTs = (yyyyMmDd: string) =>
   const [openLoaded, setOpenLoaded] = useState(false);
 
   // ── Cash-in form ──────────────────────────────────────────────────
-  const [ciDate, setCiDate]   = useState(isoToday);
-
+  const [ciDate, setCiDate] = useState(isoToday());
   const [ciAmount, setCiAmount] = useState<string>("");
   const [ciSource, setCiSource] = useState<string>("");
   const [ciNote, setCiNote] = useState<string>("");
   const [showDeletedCashIns, setShowDeletedCashIns] = useState(false);
 
   // ── Deposits form (tracker only) ──────────────────────────────────
-  const [depDate, setDepDate] = useState(isoToday);
-
+  const [depDate, setDepDate] = useState(isoToday());
   const [depAmount, setDepAmount] = useState<string>("");
   const [depMethod, setDepMethod] = useState<string>("Bank");
   const [depNote, setDepNote] = useState<string>("");
@@ -223,6 +222,22 @@ const toTs = (yyyyMmDd: string) =>
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [entriesSum, setEntriesSum] = useState<number>(0);
 
+  // ── Opening (computed for summary card: override else prev month's closing) ──
+const [openingCard, setOpeningCard] = useState<number>(0);
+
+useEffect(() => {
+  if (!storeId || !month) return;
+  (async () => {
+    try {
+      const v = await computeOpeningForMonth(String(storeId), month);
+      setOpeningCard(v);
+    } catch {
+      // no-op; leave card at 0 on error
+    }
+  })();
+}, [storeId, month]);
+
+
   // Opening balance load
   useEffect(() => {
     if (!storeId || !month) return;
@@ -248,18 +263,19 @@ const toTs = (yyyyMmDd: string) =>
     })();
   }, [storeId, month]);
 
-  // Cash-ins by month (client sort, no composite index)
+  // Cash-ins by month (client sort; keep deleted in list for "Show deleted")
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
       try {
         setErr(null);
-        const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
-        const snap = await getDocs(qy);
-        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
-        rows.sort((a: any, b: any) =>
-          (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
+        const qy = query(
+          collection(db, "stores", String(storeId), "cashins"),
+          where("month", "==", month)
         );
+        const snap = await getDocs(qy);
+        const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
+        rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
         setCashIns(rows);
       } catch (e: any) {
         setErr(e?.message || String(e));
@@ -276,10 +292,8 @@ const toTs = (yyyyMmDd: string) =>
         setErr(null);
         const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
         const snap = await getDocs(qy);
-        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
-        rows.sort((a: any, b: any) =>
-          (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-        );
+        const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+        rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
         setDeposits(rows);
       } catch (e: any) {
         setErr(e?.message || String(e));
@@ -297,9 +311,7 @@ const toTs = (yyyyMmDd: string) =>
         const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
         const snap = await getDocs(qy);
         const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        rows.sort((a: any, b: any) =>
-          (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-        );
+        rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
         setAudits(rows as Audit[]);
       } catch (e: any) {
         setErr(e?.message || String(e));
@@ -308,34 +320,59 @@ const toTs = (yyyyMmDd: string) =>
     })();
   }, [storeId, month]);
 
-  // Sum entries (gross) for month
-  useEffect(() => {
-    if (!storeId || !month) return;
-    (async () => {
-      try {
-        setErr(null);
-        const qy = query(collection(db, "stores", storeId, "entries"), where("month", "==", month));
-        const snap = await getDocs(qy);
-        let total = 0;
-        snap.forEach((d) => (total += Number(d.data().amount || 0)));
-        setEntriesSum(Number(total.toFixed(2)));
-      } catch (e: any) {
-        setErr(e?.message || String(e));
-        setEntriesSum(0);
-      }
-    })();
-  }, [storeId, month]);
+// Sum entries (gross) for month (live, and ignore soft-deleted)
+useEffect(() => {
+  if (!storeId || !month) return;
 
+  const qy = query(
+    collection(db, "stores", String(storeId), "entries"),
+    where("month", "==", month)
+  );
+
+  const unsub = onSnapshot(
+    qy,
+    (snap) => {
+      let total = 0;
+      snap.forEach((d) => {
+        const x = d.data() as any;
+        if (x.deleted === true) return;       // <-- ignore soft-deleted
+        total += Number(x.amount || 0);
+      });
+      setEntriesSum(Number(total.toFixed(2)));
+    },
+    (e) => {
+      setErr(e?.message || String(e));
+      setEntriesSum(0);
+    }
+  );
+
+  return () => unsub();
+}, [storeId, month]);
+
+
+  // Totals (ignore deleted)
   const cashInSum = useMemo(
-    () => Number(cashIns.reduce((s, r) => s + Number(r.amount || 0), 0).toFixed(2)),
+    () =>
+      Number(
+        cashIns
+          .filter((r) => !r.deleted)
+          .reduce((s, r) => s + Number(r.amount || 0), 0)
+          .toFixed(2)
+      ),
     [cashIns]
   );
   const depositsSum = useMemo(
-    () => Number(deposits.reduce((s, r) => s + Number(r.amount || 0), 0).toFixed(2)),
+    () =>
+      Number(
+        deposits
+          .filter((r) => !r.deleted)
+          .reduce((s, r) => s + Number(r.amount || 0), 0)
+          .toFixed(2)
+      ),
     [deposits]
   );
 
-  const opening = Number.parseFloat(openingAmt || "0");
+  const opening = openingCard;
   const closing = useMemo(
     () => Number((opening + cashInSum - entriesSum).toFixed(2)),
     [opening, cashInSum, entriesSum]
@@ -358,7 +395,7 @@ const toTs = (yyyyMmDd: string) =>
     };
   };
 
-    function StatCard({
+  function StatCard({
     label,
     value,
     danger = false,
@@ -376,7 +413,6 @@ const toTs = (yyyyMmDd: string) =>
     );
   }
 
-
   // ── Save handlers ─────────────────────────────────────────────────
   async function saveOpening(e: React.FormEvent) {
     e.preventDefault();
@@ -388,6 +424,8 @@ const toTs = (yyyyMmDd: string) =>
         note: openingNote,
         createdAt: Timestamp.now(),
       });
+      const v = await computeOpeningForMonth(String(storeId), month);
+      setOpeningCard(v);
       alert("Opening balance saved.");
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -411,6 +449,7 @@ const toTs = (yyyyMmDd: string) =>
         createdByUid: user.uid,
         createdByName: user.name,
         createdByEmail: user.email,
+        deleted: false,
       });
       setCiAmount("");
       setCiSource("");
@@ -420,9 +459,7 @@ const toTs = (yyyyMmDd: string) =>
       const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setCashIns(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -454,10 +491,8 @@ const toTs = (yyyyMmDd: string) =>
       // refresh
       const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
       const snap = await getDocs(qy);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setDeposits(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -499,9 +534,7 @@ const toTs = (yyyyMmDd: string) =>
       const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setAudits(rows as Audit[]);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -509,41 +542,38 @@ const toTs = (yyyyMmDd: string) =>
   };
 
   // ── Audit soft-delete handler ───────────────────────────────────────
-async function onDeleteAudit(a: Audit) {
-  if (!storeId || !a?.id) return;
-  if (!confirm("Delete this audit?")) return;
-  try {
-    setErr(null);
-    const user = me();
-    // Soft-delete via merge (keeps required base fields intact)
-    await setDoc(
-      doc(db, "stores", storeId, "audits", a.id),
-      {
-        deleted: true,
-        deletedAt: Timestamp.now(),
-        deletedByUid: user.uid,
-        deletedByName: user.name,
-        deletedByEmail: user.email,
-        updatedAt: Timestamp.now(),
-        updatedByUid: user.uid,
-        updatedByName: user.name,
-        updatedByEmail: user.email,
-      },
-      { merge: true }
-    );
+  async function onDeleteAudit(a: Audit) {
+    if (!storeId || !a?.id) return;
+    if (!confirm("Delete this audit?")) return;
+    try {
+      setErr(null);
+      const user = me();
+      await setDoc(
+        doc(db, "stores", storeId, "audits", a.id),
+        {
+          deleted: true,
+          deletedAt: Timestamp.now(),
+          deletedByUid: user.uid,
+          deletedByName: user.name,
+          deletedByEmail: user.email,
+          updatedAt: Timestamp.now(),
+          updatedByUid: user.uid,
+          updatedByName: user.name,
+          updatedByEmail: user.email,
+        },
+        { merge: true }
+      );
 
-    // refresh
-    const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
-    const snap = await getDocs(qy);
-    const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-    rows.sort((x: any, y: any) =>
-      (x.date?.toDate?.()?.getTime?.() ?? 0) - (y.date?.toDate?.()?.getTime?.() ?? 0)
-    );
-    setAudits(rows as Audit[]);
-  } catch (e: any) {
-    setErr(e?.message || String(e));
+      // refresh
+      const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      rows.sort((x: any, y: any) => getTime(x.date) - getTime(y.date));
+      setAudits(rows as Audit[]);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
-}
 
   // ── Edit/Delete (soft delete) helpers ─────────────────────────────
   const [editingCashIn, setEditingCashIn] = useState<CashIn | null>(null);
@@ -571,9 +601,7 @@ async function onDeleteAudit(a: Audit) {
       const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setCashIns(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -582,6 +610,7 @@ async function onDeleteAudit(a: Audit) {
 
   async function onDeleteCashIn(id?: string) {
     if (!storeId || !id) return;
+    if (!confirm("Delete this cash-in?")) return;
     try {
       setErr(null);
       const user = me();
@@ -597,9 +626,7 @@ async function onDeleteAudit(a: Audit) {
       const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setCashIns(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -626,10 +653,8 @@ async function onDeleteAudit(a: Audit) {
 
       const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
       const snap = await getDocs(qy);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setDeposits(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -638,6 +663,7 @@ async function onDeleteAudit(a: Audit) {
 
   async function onDeleteDeposit(id?: string) {
     if (!storeId || !id) return;
+    if (!confirm("Delete this deposit?")) return;
     try {
       setErr(null);
       const user = me();
@@ -651,10 +677,8 @@ async function onDeleteAudit(a: Audit) {
 
       const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
       const snap = await getDocs(qy);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
-      rows.sort((a: any, b: any) =>
-        (a.date?.toDate?.()?.getTime?.() ?? 0) - (b.date?.toDate?.()?.getTime?.() ?? 0)
-      );
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
       setDeposits(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -663,19 +687,67 @@ async function onDeleteAudit(a: Audit) {
 
   if (!storeId) return <main className="p-6">No store selected.</main>;
 
+  // Compute opening for month m as either:
+// 1) explicit override in /openingBalances/{m}, else
+// 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev)
+async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
+  // 1) explicit override?
+  const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
+  if (openSnap.exists()) {
+    return Number(((openSnap.data() as any).amount ?? 0));
+  }
+
+  // figure previous month key
+  const [yy, mm] = m.split("-").map(Number);
+  const prev = new Date(yy, (mm - 1) - 1, 1); // previous month
+  const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+
+  // prev open (0 if never set)
+  const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
+  const prevOpen = prevOpenSnap.exists()
+    ? Number(((prevOpenSnap.data() as any).amount ?? 0))
+    : 0;
+
+  // sum cash-ins (skip soft-deleted)
+  const cinSnap = await getDocs(
+    query(collection(db, "stores", storeId, "cashins"), where("month", "==", pm))
+  );
+  let cin = 0;
+  cinSnap.forEach(d => {
+    const x = d.data() as any;
+    if (x.deleted === true) return;
+    cin += Number(x.amount || 0);
+  });
+
+// sum entries (cash-out) — ignore soft-deleted
+const outSnap = await getDocs(
+  query(collection(db, "stores", storeId, "entries"), where("month", "==", pm))
+);
+let out = 0;
+outSnap.forEach((d) => {
+  const x = d.data() as any;
+  if (x.deleted === true) return;
+  out += Number(x.amount || 0);
+});
+
+
+  return Number((prevOpen + cin - out).toFixed(2));
+}
+
+
   // ── UI ────────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen p-6 space-y-6">
-     <h1 className="text-2xl font-semibold mb-2 capitalize">{storeName} · Admin</h1>
+      <h1 className="text-2xl font-semibold mb-2 capitalize">{storeName} · Admin</h1>
 
-{/* Summary cards (label on top, amount below) */}
-<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-4">
-  <StatCard label="Entries (gross)" value={entriesSum} />
-  <StatCard label="Cash in" value={cashInSum} />
-  <StatCard label="Opening" value={opening} />
-  <StatCard label="Projected closing" value={closing} danger={closing < 0} />
-  <StatCard label="Deposits (tracker)" value={depositsSum} />
-</div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-4">
+        <StatCard label="Entries (gross)" value={entriesSum} />
+        <StatCard label="Cash in" value={cashInSum} />
+        <StatCard label="Opening" value={opening} />
+        <StatCard label="Projected closing" value={closing} danger={closing < 0} />
+        <StatCard label="Deposits (tracker)" value={depositsSum} />
+      </div>
 
       {/* Filters / Export controls */}
       <section className="rounded-lg border bg-white p-4">
@@ -822,117 +894,116 @@ async function onDeleteAudit(a: Audit) {
               </tr>
             </thead>
             <tbody>
-  {cashIns
-    .filter((ci) => showDeletedCashIns || !ci.deleted)
-    .map((ci) => {
-      const edited = !!ci.updatedAt && !ci.deleted;
-      const rowClass = ci.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
-      const creator =
-        ci.createdByName || ci.createdByEmail || (ci.createdByUid ? `uid:${ci.createdByUid}` : "");
-      const editor =
-        ci.updatedByName || ci.updatedByEmail || (ci.updatedByUid ? `uid:${ci.updatedByUid}` : "");
+              {cashIns
+                .filter((ci) => showDeletedCashIns || !ci.deleted)
+                .map((ci) => {
+                  const edited = !!ci.updatedAt && !ci.deleted;
+                  const rowClass = ci.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
+                  const creator =
+                    ci.createdByName || ci.createdByEmail || (ci.createdByUid ? `uid:${ci.createdByUid}` : "");
+                  const editor =
+                    ci.updatedByName || ci.updatedByEmail || (ci.updatedByUid ? `uid:${ci.updatedByUid}` : "");
 
-      if (editingCashIn?.id === ci.id) {
-        // Inline edit row
-        return (
-          <tr key={ci.id} className="border-b last:border-b-0">
-            <td className="py-2 pr-4">
-              <input
-                type="date"
-                className="border px-2 py-1 rounded"
-                defaultValue={isoDate(ci.date)}
-                onChange={(e) =>
-                  setEditingCashIn((prev) =>
-                    prev ? { ...prev, date: toTs(e.target.value) } : prev
-                  )
-                }
-              />
-            </td>
-            <td className="py-2 pr-4">
-              <input
-                type="number"
-                step="0.01"
-                defaultValue={String(ci.amount)}
-                onChange={(e) =>
-                  setEditingCashIn((prev) =>
-                    prev ? { ...(prev as CashIn), amount: Number(e.target.value || 0) } : prev
-                  )
-                }
-                className="border px-2 py-1 rounded w-28"
-              />
-            </td>
-            <td className="py-2 pr-4">
-              <input
-                defaultValue={ci.source || ""}
-                onChange={(e) =>
-                  setEditingCashIn((prev) =>
-                    prev ? { ...(prev as CashIn), source: e.target.value } : prev
-                  )
-                }
-                className="border px-2 py-1 rounded"
-              />
-            </td>
-            <td className="py-2 pr-4">
-              <input
-                defaultValue={ci.note || ""}
-                onChange={(e) =>
-                  setEditingCashIn((prev) =>
-                    prev ? { ...(prev as CashIn), note: e.target.value } : prev
-                  )
-                }
-                className="border px-2 py-1 rounded"
-              />
-            </td>
-            <td className="py-2 pr-4 text-xs">
-              <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
-                edit…
-              </span>
-            </td>
-            <td className="py-2 pr-4 space-x-2">
-              <button className="underline" onClick={onEditCashInSave}>
-                Save
-              </button>
-              <button className="underline" onClick={() => setEditingCashIn(null)}>
-                Cancel
-              </button>
-            </td>
-          </tr>
-        );
-      }
+                  if (editingCashIn?.id === ci.id) {
+                    // Inline edit row
+                    return (
+                      <tr key={ci.id} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4">
+                          <input
+                            type="date"
+                            className="border px-2 py-1 rounded"
+                            defaultValue={isoDate(ci.date)}
+                            onChange={(e) =>
+                              setEditingCashIn((prev) =>
+                                prev ? { ...prev, date: toTs(e.target.value) } : prev
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            type="number"
+                            step="0.01"
+                            defaultValue={String(ci.amount)}
+                            onChange={(e) =>
+                              setEditingCashIn((prev) =>
+                                prev ? { ...(prev as CashIn), amount: Number(e.target.value || 0) } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded w-28"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={ci.source || ""}
+                            onChange={(e) =>
+                              setEditingCashIn((prev) =>
+                                prev ? { ...(prev as CashIn), source: e.target.value } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={ci.note || ""}
+                            onChange={(e) =>
+                              setEditingCashIn((prev) =>
+                                prev ? { ...(prev as CashIn), note: e.target.value } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                            edit…
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4 space-x-2">
+                          <button className="underline" onClick={onEditCashInSave}>
+                            Save
+                          </button>
+                          <button className="underline" onClick={() => setEditingCashIn(null)}>
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
 
-      // Normal (non-edit) row
-      return (
-        <tr key={ci.id} className={`border-b last:border-b-0 ${rowClass}`}>
-          <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
-          <td className="py-2 pr-4">{Number(ci.amount || 0).toFixed(2)}</td>
-          <td className="py-2 pr-4">{ci.source ?? ""}</td>
-          <td className="py-2 pr-4">{ci.note ?? ""}</td>
-          <td className="py-2 pr-4 text-xs">
-            <span
-              className="inline-block rounded px-2 py-0.5 bg-gray-100"
-              title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
-            >
-              {creator || "—"}
-            </span>
-          </td>
-          <td className="py-2 pr-4 space-x-3">
-            {!ci.deleted && (
-              <>
-                <button className="underline" onClick={() => setEditingCashIn(ci)}>
-                  Edit
-                </button>
-                <button className="underline text-red-700" onClick={() => onDeleteCashIn(ci.id)}>
-                  Delete
-                </button>
-              </>
-            )}
-            {ci.deleted && <span className="text-xs">deleted</span>}
-          </td>
-        </tr>
-      );
-    })}
-</tbody>
-
+                  // Normal (non-edit) row
+                  return (
+                    <tr key={ci.id} className={`border-b last:border-b-0 ${rowClass}`}>
+                      <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
+                      <td className="py-2 pr-4">{Number(ci.amount || 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4">{ci.source ?? ""}</td>
+                      <td className="py-2 pr-4">{ci.note ?? ""}</td>
+                      <td className="py-2 pr-4 text-xs">
+                        <span
+                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
+                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+                        >
+                          {creator || "—"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 space-x-3">
+                        {!ci.deleted && (
+                          <>
+                            <button className="underline" onClick={() => setEditingCashIn(ci)}>
+                              Edit
+                            </button>
+                            <button className="underline text-red-700" onClick={() => onDeleteCashIn(ci.id)}>
+                              Delete
+                            </button>
+                          </>
+                        )}
+                        {ci.deleted && <span className="text-xs">deleted</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
           </table>
         </div>
       </section>
@@ -1011,118 +1082,117 @@ async function onDeleteAudit(a: Audit) {
               </tr>
             </thead>
             <tbody>
-  {deposits
-    .filter((d) => showDeletedDeposits || !d.deleted)
-    .map((d) => {
-      const edited = !!d.updatedAt && !d.deleted;
-      const rowClass = d.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
-      const creator =
-        d.createdByName || d.createdByEmail || (d.createdByUid ? `uid:${d.createdByUid}` : "");
-      const editor =
-        d.updatedByName || d.updatedByEmail || (d.updatedByUid ? `uid:${d.updatedByUid}` : "");
+              {deposits
+                .filter((d) => showDeletedDeposits || !d.deleted)
+                .map((d) => {
+                  const edited = !!d.updatedAt && !d.deleted;
+                  const rowClass = d.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
+                  const creator =
+                    d.createdByName || d.createdByEmail || (d.createdByUid ? `uid:${d.createdByUid}` : "");
+                  const editor =
+                    d.updatedByName || d.updatedByEmail || (d.updatedByUid ? `uid:${d.updatedByUid}` : "");
 
-      if (editingDeposit?.id === d.id) {
-        return (
-          <tr key={d.id} className="border-b last:border-b-0">
-            <td className="py-2 pr-4">
-              <input
-                type="date"
-                className="border px-2 py-1 rounded"
-                defaultValue={isoDate(d.date)}
-                onChange={(e) =>
-                  setEditingDeposit((prev) =>
-                    prev ? { ...prev, date: toTs(e.target.value) } : prev
-                  )
-                }
-              />
-            </td>
-            <td className="py-2 pr-4">
-              <input
-                type="number"
-                step="0.01"
-                defaultValue={String(d.amount)}
-                onChange={(e) =>
-                  setEditingDeposit((prev) =>
-                    prev ? { ...prev, amount: Number(e.target.value || 0) } : prev
-                  )
-                }
-                className="border px-2 py-1 rounded w-28"
-              />
-            </td>
-            <td className="py-2 pr-4">
-              <input
-                defaultValue={d.method || ""}
-                onChange={(e) =>
-                  setEditingDeposit((prev) =>
-                    prev ? { ...prev, method: e.target.value } : prev
-                  )
-                }
-                className="border px-2 py-1 rounded"
-              />
-            </td>
-            <td className="py-2 pr-4">
-              <input
-                defaultValue={d.note || ""}
-                onChange={(e) =>
-                  setEditingDeposit((prev) =>
-                    prev ? { ...prev, note: e.target.value } : prev
-                  )
-                }
-                className="border px-2 py-1 rounded"
-              />
-            </td>
-            <td className="py-2 pr-4 text-xs">
-              <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
-                edit…
-              </span>
-            </td>
-            <td className="py-2 pr-4 space-x-2">
-              <button className="underline" onClick={onEditDepositSave}>
-                Save
-              </button>
-              <button className="underline" onClick={() => setEditingDeposit(null)}>
-                Cancel
-              </button>
-            </td>
-          </tr>
-        );
-      }
+                  if (editingDeposit?.id === d.id) {
+                    return (
+                      <tr key={d.id} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4">
+                          <input
+                            type="date"
+                            className="border px-2 py-1 rounded"
+                            defaultValue={isoDate(d.date)}
+                            onChange={(e) =>
+                              setEditingDeposit((prev) =>
+                                prev ? { ...prev, date: toTs(e.target.value) } : prev
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            type="number"
+                            step="0.01"
+                            defaultValue={String(d.amount)}
+                            onChange={(e) =>
+                              setEditingDeposit((prev) =>
+                                prev ? { ...prev, amount: Number(e.target.value || 0) } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded w-28"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={d.method || ""}
+                            onChange={(e) =>
+                              setEditingDeposit((prev) =>
+                                prev ? { ...prev, method: e.target.value } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={d.note || ""}
+                            onChange={(e) =>
+                              setEditingDeposit((prev) =>
+                                prev ? { ...prev, note: e.target.value } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                            edit…
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4 space-x-2">
+                          <button className="underline" onClick={onEditDepositSave}>
+                            Save
+                          </button>
+                          <button className="underline" onClick={() => setEditingDeposit(null)}>
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
 
-      return (
-        <tr key={d.id} className={`border-b last:border-b-0 ${rowClass}`}>
-          <td className="py-2 pr-4">{fmtDate(d.date)}</td>
-          <td className="py-2 pr-4">{Number(d.amount || 0).toFixed(2)}</td>
-          <td className="py-2 pr-4">{d.method ?? ""}</td>
-          <td className="py-2 pr-4">{d.note ?? ""}</td>
-          <td className="py-2 pr-4 text-xs">
-            <span
-              className="inline-block rounded px-2 py-0.5 bg-gray-100"
-              title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
-            >
-              {creator || "—"}
-            </span>
-          </td>
-          <td className="py-2 pr-4 space-x-3">
-            {!d.deleted && (
-              <>
-                <button className="underline" onClick={() => setEditingDeposit(d)}>
-                  Edit
-                </button>
-                <button
-                  className="underline text-red-700"
-                  onClick={() => onDeleteDeposit(d.id)}
-                >
-                  Delete
-                </button>
-              </>
-            )}
-            {d.deleted && <span className="text-xs">deleted</span>}
-          </td>
-        </tr>
-      );
-    })}
-</tbody>
-
+                  return (
+                    <tr key={d.id} className={`border-b last:border-b-0 ${rowClass}`}>
+                      <td className="py-2 pr-4">{fmtDate(d.date)}</td>
+                      <td className="py-2 pr-4">{Number(d.amount || 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4">{d.method ?? ""}</td>
+                      <td className="py-2 pr-4">{d.note ?? ""}</td>
+                      <td className="py-2 pr-4 text-xs">
+                        <span
+                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
+                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+                        >
+                          {creator || "—"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 space-x-3">
+                        {!d.deleted && (
+                          <>
+                            <button className="underline" onClick={() => setEditingDeposit(d)}>
+                              Edit
+                            </button>
+                            <button
+                              className="underline text-red-700"
+                              onClick={() => onDeleteDeposit(d.id)}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                        {d.deleted && <span className="text-xs">deleted</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
           </table>
         </div>
       </section>
@@ -1216,7 +1286,7 @@ async function onDeleteAudit(a: Audit) {
                 </thead>
                 <tbody>
                   {audits
-                    .filter(a => !a.deleted)      // hide deleted by default
+                    .filter(a => !a.deleted)
                     .slice(-5)
                     .map((a) => {
                       const dt = a.date?.toDate?.() ?? new Date();
@@ -1244,7 +1314,6 @@ async function onDeleteAudit(a: Audit) {
                       );
                     })}
                 </tbody>
-
               </table>
             </div>
           </>

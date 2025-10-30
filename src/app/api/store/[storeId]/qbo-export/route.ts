@@ -87,7 +87,10 @@ export async function GET(req: Request) {
       where("date", "<=", endTs)
     );
     const entSnap = await getDocs(entQ);
-    let entries = entSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    let entries = entSnap.docs
+  .map((d) => ({ id: d.id, ...(d.data() as any) }))
+  .filter((e: any) => e.deleted !== true); // <-- exclude soft-deleted entries
+
 
     // Resolve account field to an allowed *name*
     entries = entries.map((e: any) => {
@@ -121,7 +124,10 @@ export async function GET(req: Request) {
         where("date", "<=", endTs)
       );
       const ciSnap = await getDocs(ciQ);
-      cashins = ciSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      cashins = ciSnap.docs
+  .map((d) => ({ id: d.id, ...(d.data() as any) }))
+  .filter((c: any) => c.deleted !== true); // <-- exclude soft-deleted cash-ins
+
       cashins.sort(
         (a: any, b: any) =>
           ((a.date?.toDate?.() as Date | undefined)?.getTime() ?? 0) -
