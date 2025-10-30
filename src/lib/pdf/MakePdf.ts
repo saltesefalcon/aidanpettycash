@@ -1,84 +1,70 @@
-import { jsPDF } from "jspdf";
+// src/lib/pdf/makePdf.ts
+import { PDFDocument } from "pdf-lib";
 
-function loadImage(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
-    img.src = dataUrl;
-  });
-}
-
-// Single-page (for testing)
-export async function makeSinglePagePdfFromDataUrl(dataUrl: string): Promise<Blob> {
-  const img = await loadImage(dataUrl);
-  const orientation =
-    img.naturalWidth >= img.naturalHeight ? "landscape" : "portrait";
-
-  const pdf = new jsPDF({
-    unit: "pt",
-    format: "letter",
-    orientation,
-    compress: true,
-  });
-
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-
-  const margin = 24;
-  const maxW = pageW - margin * 2;
-  const maxH = pageH - margin * 2;
-
-  const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
-  const drawW = img.naturalWidth * scale;
-  const drawH = img.naturalHeight * scale;
-
-  const x = margin + (maxW - drawW) / 2;
-  const y = margin + (maxH - drawH) / 2;
-
-  pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH);
-
-  return pdf.output("blob");
-}
-
-// Multi-page final PDF
+/**
+ * Build a multi-page PDF from image data URLs (png/jpg).
+ * Returns a Blob you can upload to Firebase Storage.
+ */
 export async function makeMultiPagePdfFromDataUrls(
-  dataUrls: string[]
+  pages: string[]
 ): Promise<Blob> {
-  if (dataUrls.length === 0) {
-    throw new Error("No pages to export");
+  const pdf = await PDFDocument.create();
+
+  for (const dataUrl of pages) {
+    const bytes = dataUrlToBytes(dataUrl); // Uint8Array
+
+    // Detect PNG vs JPG by MIME in the data URL
+    const isPng = dataUrl.startsWith("data:image/png");
+    const image = isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+
+    // Use the image’s native pixel size for a crisp page
+    const page = pdf.addPage([image.width, image.height]);
+    page.drawImage(image, {
+      x: 0,
+      y: 0,
+      width: image.width,
+      height: image.height,
+    });
   }
 
-  const pdf = new jsPDF({
-    unit: "pt",
-    format: "letter",
-    orientation: "portrait",
-    compress: true,
-  });
+  // pdf.save() -> Uint8Array. Copy into a fresh ArrayBuffer (not SAB) for Blob.
+  const u8 = await pdf.save();
+  const ab = new ArrayBuffer(u8.byteLength);
+  new Uint8Array(ab).set(u8);
+  return new Blob([ab], { type: "application/pdf" });
+}
 
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const margin = 24;
-  const maxW = pageW - margin * 2;
-  const maxH = pageH - margin * 2;
+/**
+ * Convert a data: URL to raw bytes (Uint8Array).
+ * Works in the browser and (if needed) during SSR with a Buffer fallback.
+ */
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  if (!dataUrl.startsWith("data:")) {
+    throw new Error("Expected a data: URL");
+  }
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) throw new Error("Malformed data: URL");
 
-  for (let i = 0; i < dataUrls.length; i++) {
-    const dataUrl = dataUrls[i];
-    const img = await loadImage(dataUrl);
+  const meta = dataUrl.slice(5, comma); // after "data:"
+  const isBase64 = /;base64/i.test(meta);
+  const payload = dataUrl.slice(comma + 1);
 
-    const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
-    const drawW = img.naturalWidth * scale;
-    const drawH = img.naturalHeight * scale;
-    const x = margin + (maxW - drawW) / 2;
-    const y = margin + (maxH - drawH) / 2;
-
-    if (i === 0) {
-      pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH);
-    } else {
-      pdf.addPage();
-      pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH);
+  if (isBase64) {
+    if (typeof atob === "function") {
+      const bin = atob(payload);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
     }
+    const NodeBuffer = (globalThis as any).Buffer;
+    if (NodeBuffer?.from) {
+      const buf = NodeBuffer.from(payload, "base64");
+      return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    }
+    throw new Error("Base64 decoder not available in this environment");
   }
 
-  return pdf.output("blob");
+  // URL-encoded (rare for images)
+  const decoded = decodeURIComponent(payload);
+  return new TextEncoder().encode(decoded);
 }

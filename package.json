@@ -13,8 +13,11 @@
     "firebase-admin": "^13.5.0",
     "jspdf": "^3.0.3",
     "next": "15.5.4",
+    "nodemailer": "^7.0.10",
+    "pdf-lib": "^1.17.1",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "react-easy-crop": "^5.5.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
