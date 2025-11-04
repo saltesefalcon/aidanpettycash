@@ -149,7 +149,7 @@ export default function SettingsPage() {
 
       {/* 3) Spacer + fixed mobile nav at the very bottom */}
       <div className="h-16 md:hidden" />
-      <MobileNav storeId={String(storeId)} />
+      <MobileNav storeId={String(storeId)} active="settings" />
     </main>
   );
 }

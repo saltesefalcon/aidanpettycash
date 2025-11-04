@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import MobileNav from "@/components/MobileNav";
 
 function lastDayOfMonth(yyyyMm: string) {
   const [y, m] = yyyyMm.split("-").map(Number);
@@ -70,7 +71,8 @@ export default function QboExportPage() {
   }
 
   return (
-    <main className="p-6 space-y-4">
+    <main className="p-6 space-y-4 pb-24">  {/* pb so content doesn't sit under fixed nav */}
+
       <h1 className="text-2xl font-semibold capitalize">{storeName} · QBO Export</h1>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -126,6 +128,9 @@ export default function QboExportPage() {
       <pre className="bg-white border rounded p-3 overflow-auto text-xs whitespace-pre-wrap">
         {out || "Preview JSON will appear here."}
       </pre>
+      <div className="h-16 md:hidden" />   {/* spacer for the fixed mobile bar */}
+<MobileNav storeId={String(storeId)} />
+
     </main>
   );
 }
