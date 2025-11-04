@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 
 import MonthPicker from "@/components/MonthPicker";
+import MobileNav from "@/components/MobileNav";
 
 // ── Types ───────────────────────────────────────────────────────────
 type CashIn = {
@@ -739,6 +740,7 @@ outSnap.forEach((d) => {
   return (
     <main className="min-h-screen p-6 space-y-6">
       <h1 className="text-2xl font-semibold mb-2 capitalize">{storeName} · Admin</h1>
+<MobileNav storeId={String(storeId)} active="entries" />
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-4">

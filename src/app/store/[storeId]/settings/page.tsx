@@ -8,6 +8,7 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import MobileNav from "@/components/MobileNav";
 
 type Account = { id: string; name: string; createdAt?: any };
 

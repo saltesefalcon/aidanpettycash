@@ -11,6 +11,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { round2, HST_RATE } from "@/lib/money";
 import MonthPicker from "@/components/MonthPicker";
 import Link from "next/link";
+import MobileNav from "@/components/MobileNav";
 
 type Account = { id: string; name?: string };
 type EditState = {
@@ -452,7 +453,7 @@ async function computeOpeningForMonth(storeId: string, m: string): Promise<numbe
         invoiceContentType: "application/pdf",
       });
 
-      setMsg("Entry saved.");
+      
       // Reset form fields so the next entry starts clean
       setDateStr(todayStr);
       setVendor("");
@@ -462,6 +463,7 @@ async function computeOpeningForMonth(storeId: string, m: string): Promise<numbe
       setHstStr("");
       setDept("FOH");
       resetScanState(); // fully reset so the next entry starts clean
+      setMsg("Entry saved.");
       await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
     } catch (e: any) {
       setErr(e?.message || String(e));

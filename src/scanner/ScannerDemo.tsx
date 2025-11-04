@@ -182,6 +182,19 @@ useEffect(() => {
     setStream(null);
   }
 
+  function exitOrBack() {
+  // stop the camera first
+  stopCamera();
+
+  // Try to close the popup/window if it was opened by Entries
+  try { window.close(); } catch {}
+
+  // iOS Safari often replaces the current tab and won’t allow close().
+  // In that case, navigate back to the Entries page for this store/month.
+  const month = params.dateISO.slice(0, 7); // YYYY-MM
+  location.href = `/store/${params.storeId}/entries?m=${month}`;
+}
+
   // Downscale (+ optional grayscale) helper
   function toCompressedDataUrl(srcCanvas: HTMLCanvasElement): string {
     const w0 = srcCanvas.width;
@@ -382,16 +395,20 @@ const videoStyle: React.CSSProperties = {
             <video ref={videoRef} style={videoStyle} playsInline muted />
           </div>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
-            {!stream ? (
-              <button onClick={startCamera} style={btn("blue")}>Start Camera</button>
-            ) : (
-              <>
-                <button onClick={capturePage} style={btn("green")}>Capture Page</button>
-                <button onClick={stopCamera} style={btn("gray")}>Stop Camera</button>
-              </>
-            )}
-          </div>
+<div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+  {!stream ? (
+    <button onClick={startCamera} style={btn("blue")}>Start Camera</button>
+  ) : (
+    <>
+      <button onClick={capturePage} style={btn("green")}>Capture Page</button>
+      <button onClick={stopCamera} style={btn("gray")}>Stop Camera</button>
+    </>
+  )}
+
+  {/* New: always-visible exit button for mobile users */}
+  <button onClick={exitOrBack} style={btn("gray")}>Done / Back</button>
+</div>
+
 
           {error && <p style={{ color: "#dc2626", marginTop: 8 }}>{error}</p>}
         </div>
