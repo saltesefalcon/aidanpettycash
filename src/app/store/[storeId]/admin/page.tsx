@@ -738,9 +738,8 @@ outSnap.forEach((d) => {
 
   // ── UI ────────────────────────────────────────────────────────────
   return (
-    <main className="p-6 space-y-4 pb-24">
+    <main className="min-h-screen p-6 space-y-4 pb-24">
       <h1 className="text-2xl font-semibold mb-2 capitalize">{storeName} · Admin</h1>
-<MobileNav storeId={String(storeId)} active="entries" />
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-4">
@@ -1321,6 +1320,8 @@ outSnap.forEach((d) => {
           </>
         )}
       </section>
+    <div className="h-16 md:hidden" />
+    <MobileNav storeId={String(storeId)} active="admin" />   // on Admin page
     </main>
   );
 }
