@@ -568,17 +568,6 @@ async function deleteRow(id: string) {
         </div>
       </div>
 
-      {/* Mobile quick nav */}
-<nav className="md:hidden -mt-2 mb-2">
-  <div className="flex gap-2 overflow-x-auto no-scrollbar text-sm">
-    <Link href={`/store/${storeId}/dashboard`} className="px-3 py-1.5 border rounded-full bg-white">Dashboard</Link>
-    <Link href={`/store/${storeId}/entries`}   className="px-3 py-1.5 border rounded-full bg-white font-semibold">Entries</Link>
-    <Link href={`/store/${storeId}/admin`}     className="px-3 py-1.5 border rounded-full bg-white">Admin</Link>
-    <Link href={`/store/${storeId}/qbo-export`} className="px-3 py-1.5 border rounded-full bg-white">QBO Export</Link>
-    <Link href={`/store/${storeId}/settings`}  className="px-3 py-1.5 border rounded-full bg-white">Settings</Link>
-  </div>
-</nav>
-
       {/* Summary cards */}
       <section className="grid gap-3 md:grid-cols-5">
         <div className="rounded-md border bg-white p-3">
