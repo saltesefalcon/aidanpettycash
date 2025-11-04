@@ -738,7 +738,7 @@ outSnap.forEach((d) => {
 
   // ── UI ────────────────────────────────────────────────────────────
   return (
-    <main className="min-h-screen p-6 space-y-6">
+    <main className="p-6 space-y-4 pb-24">
       <h1 className="text-2xl font-semibold mb-2 capitalize">{storeName} · Admin</h1>
 <MobileNav storeId={String(storeId)} active="entries" />
 

@@ -554,12 +554,13 @@ async function deleteRow(id: string) {
 
   // ===== UI =====
   return (
-    <main className="p-4 md:p-6 space-y-6 max-w-screen-xl mx-auto">
+    <main className="p-6 space-y-4 pb-24">
       {/* Header + month picker */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <h1 className="text-2xl font-semibold mb-2 capitalize tracking-tight">
           {(storeName || storeId) + " · Entries"}
         </h1>
+
         <div className="flex items-center gap-3">
           <label className="text-sm">Month</label>
           <MonthPicker value={monthSel} onChange={setMonthAndUrl} yearStart={2025} yearEnd={2035} />
@@ -966,6 +967,8 @@ async function deleteRow(id: string) {
         </div>
         <div className="p-4 overflow-x-auto" />
       </section>
+      <div className="h-16 md:hidden" />
+<MobileNav storeId={String(storeId)} active="entries" />
     </main>
   );
 }
