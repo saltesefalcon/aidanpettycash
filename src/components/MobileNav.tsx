@@ -35,7 +35,12 @@ export default function MobileNav({
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t border-gray-200">
+    <nav className="fixed inset-x-0 bottom-0 z-[999] md:hidden bg-white border-t border-gray-200"
+        style={{
+            // iOS safe area for the home indicator so the bar sits flush to the very bottom
+            paddingBottom: "env(safe-area-inset-bottom)",
+            }}
+            >
       <div className="grid grid-cols-4 text-xs">
         <Link
           href={hrefFor("dashboard")}
