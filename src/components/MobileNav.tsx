@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-type Active = "dashboard" | "entries" | "qbo" | "settings" | "admin";
+type Active = "dashboard" | "entries" | "admin" | "qbo" | "settings" ;
 
 export default function MobileNav({
   storeId = "",
@@ -18,10 +18,10 @@ export default function MobileNav({
   const routeOf: Record<Active, string> = {
     dashboard: "dashboard",
     entries: "entries",
+    admin: "admin",
     qbo: "qbo-export",
     settings: "settings",
-    admin: "admin",
-  };
+    };
 
   // Build hrefs: dashboard is global (/dashboard), all others are store-scoped
   const hrefFor = (key: Active) =>
@@ -48,6 +48,12 @@ export default function MobileNav({
           className={`py-3 text-center ${isActive("entries") ? "font-semibold" : ""}`}
         >
           Entries
+        </Link>
+        <Link
+          href={hrefFor("admin")}
+          className={`py-3 text-center ${isActive("admin") ? "font-semibold" : ""}`}
+        >
+          Admin
         </Link>
         <Link
           href={hrefFor("qbo")}
