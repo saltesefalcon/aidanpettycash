@@ -25,6 +25,22 @@ const ENABLE_GRAYSCALE = false; // set true to drop color (smaller files)
 export default function ScannerDemo() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // --- rotate default (desktop = ON, mobile/tablet = OFF) ----------------------
+const isMobileLike = () =>
+  (typeof navigator !== "undefined") &&
+  ( /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1 );
+
+const [rotate90, setRotate90] = useState<boolean>(() => {
+  const saved = (typeof window !== "undefined") ? localStorage.getItem("scanner:rotate90") : null;
+  if (saved !== null) return saved === "1";
+  return !isMobileLike(); // desktop default true, phones/tablets false
+});
+
+useEffect(() => {
+  try { localStorage.setItem("scanner:rotate90", rotate90 ? "1" : "0"); } catch {}
+}, [rotate90]);
+
+
   // ---- URL params from opener ----
   const search = useSearchParams();
   const storeId = (search.get("store") || "beacon").toLowerCase();
@@ -211,21 +227,30 @@ export default function ScannerDemo() {
     if (!wctx) return;
     wctx.drawImage(v, 0, 0, work.width, work.height);
 
-    // rotate into portrait
-    rotated.width = work.height;
-    rotated.height = work.width;
-    const rctx = rotated.getContext("2d");
-    if (!rctx) return;
-    rctx.save();
-    rctx.translate(rotated.width, 0);
-    rctx.rotate(Math.PI / 2);
-    rctx.imageSmoothingEnabled = true;
-    rctx.imageSmoothingQuality = "high";
-    rctx.drawImage(work, 0, 0);
-    rctx.restore();
+// rotate into portrait only if enabled
+let srcForCompression: HTMLCanvasElement;
 
-    // compress (downscale + JPEG quality [+ optional grayscale])
-    const jpegDataUrl = toCompressedDataUrl(rotated);
+if (rotate90) {
+  rotated.width = work.height;
+  rotated.height = work.width;
+  const rctx = rotated.getContext("2d");
+  if (!rctx) return;
+  rctx.save();
+  rctx.translate(rotated.width, 0);
+  rctx.rotate(Math.PI / 2);
+  rctx.imageSmoothingEnabled = true;
+  rctx.imageSmoothingQuality = "high";
+  rctx.drawImage(work, 0, 0);
+  rctx.restore();
+  srcForCompression = rotated;
+} else {
+  // keep original camera orientation
+  srcForCompression = work;
+}
+
+// compress (downscale + JPEG quality [+ optional grayscale])
+const jpegDataUrl = toCompressedDataUrl(srcForCompression);
+
 
     setPages((prev) => [...prev, jpegDataUrl]);
   }
@@ -289,13 +314,14 @@ export default function ScannerDemo() {
     alignItems: "center",
     justifyContent: "center",
   };
-  const videoStyle: React.CSSProperties = {
-    maxWidth: "100%",
-    maxHeight: "100%",
-    objectFit: "contain",
-    background: "black",
-    transform: "rotate(90deg)",
-  };
+const videoStyle: React.CSSProperties = {
+  maxWidth: "100%",
+  maxHeight: "100%",
+  objectFit: "contain",
+  background: "black",
+  transform: rotate90 ? "rotate(90deg)" : "none",
+};
+
   const thumbStyle: React.CSSProperties = {
     width: 90,
     height: 120,
@@ -325,17 +351,28 @@ export default function ScannerDemo() {
             Camera {liveSize && <span style={{ marginLeft: 8, color: "#64748b", fontSize: 12 }}>• Live: {liveSize}</span>}
           </h2>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <label style={{ fontSize: 13, color: "#334155" }}>
-              <input
-                type="checkbox"
-                checked={keepOpen}
-                onChange={(e) => setKeepOpen(e.target.checked)}
-                style={{ marginRight: 6 }}
-              />
-              Keep window open after attach
-            </label>
-          </div>
+<div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8 }}>
+  <label style={{ fontSize: 13, color: "#334155" }}>
+    <input
+      type="checkbox"
+      checked={keepOpen}
+      onChange={(e) => setKeepOpen(e.target.checked)}
+      style={{ marginRight: 6 }}
+    />
+    Keep window open after attach
+  </label>
+
+  <label style={{ fontSize: 13, color: "#334155" }}>
+    <input
+      type="checkbox"
+      checked={rotate90}
+      onChange={(e) => setRotate90(e.target.checked)}
+      style={{ marginRight: 6 }}
+    />
+    Rotate preview 90°
+  </label>
+</div>
+
 
           <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
             Tip: For multi-page receipts, capture all pages first, then click <b>Finish &amp; Attach</b>.

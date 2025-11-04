@@ -10,6 +10,7 @@ import {
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { round2, HST_RATE } from "@/lib/money";
 import MonthPicker from "@/components/MonthPicker";
+import Link from "next/link";
 
 type Account = { id: string; name?: string };
 type EditState = {
@@ -452,6 +453,14 @@ async function computeOpeningForMonth(storeId: string, m: string): Promise<numbe
       });
 
       setMsg("Entry saved.");
+      // Reset form fields so the next entry starts clean
+      setDateStr(todayStr);
+      setVendor("");
+      setDescription("");
+      setAccountId(accounts[0]?.id ?? "");
+      setAmountStr("");
+      setHstStr("");
+      setDept("FOH");
       resetScanState(); // fully reset so the next entry starts clean
       await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
     } catch (e: any) {
@@ -555,6 +564,17 @@ async function deleteRow(id: string) {
           <div className="text-xs text-gray-600">HST helper: {Math.round(HST_RATE * 100)}%</div>
         </div>
       </div>
+
+      {/* Mobile quick nav */}
+<nav className="md:hidden -mt-2 mb-2">
+  <div className="flex gap-2 overflow-x-auto no-scrollbar text-sm">
+    <Link href={`/store/${storeId}/dashboard`} className="px-3 py-1.5 border rounded-full bg-white">Dashboard</Link>
+    <Link href={`/store/${storeId}/entries`}   className="px-3 py-1.5 border rounded-full bg-white font-semibold">Entries</Link>
+    <Link href={`/store/${storeId}/admin`}     className="px-3 py-1.5 border rounded-full bg-white">Admin</Link>
+    <Link href={`/store/${storeId}/qbo-export`} className="px-3 py-1.5 border rounded-full bg-white">QBO Export</Link>
+    <Link href={`/store/${storeId}/settings`}  className="px-3 py-1.5 border rounded-full bg-white">Settings</Link>
+  </div>
+</nav>
 
       {/* Summary cards */}
       <section className="grid gap-3 md:grid-cols-5">
