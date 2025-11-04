@@ -1321,7 +1321,7 @@ outSnap.forEach((d) => {
         )}
       </section>
     <div className="h-16 md:hidden" />
-    <MobileNav storeId={String(storeId)} active="admin" />   // on Admin page
+    <MobileNav storeId={String(storeId)} active="admin" />
     </main>
   );
 }
