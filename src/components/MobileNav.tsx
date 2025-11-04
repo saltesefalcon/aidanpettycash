@@ -1,26 +1,39 @@
 "use client";
-type Props = { storeId: string; active?: "dashboard"|"entries"|"admin"|"qbo"|"settings" };
 
-export default function MobileNav({ storeId, active }: Props) {
-  const Item = (p: { href: string; id: Props["active"]; label: string }) => (
-    <a
-      href={p.href}
-      className={
-        "px-3 py-2 rounded border text-sm whitespace-nowrap " +
-        (active === p.id ? "bg-gray-100 font-semibold" : "")
-      }
-    >
-      {p.label}
-    </a>
-  );
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+
+type Props = {
+  storeId: string;        // always pass from the page component
+};
+
+export default function MobileNav({ storeId }: Props) {
+  const sp = useSearchParams();
+  const m = sp.get("m") || new Date().toISOString().slice(0, 7); // YYYY-MM
+
+  // IMPORTANT: Dashboard is global
+  const items = [
+    { label: "Dashboard", href: `/dashboard` },                             // <— global
+    { label: "Entries",   href: `/store/${storeId}/entries?m=${m}` },
+    { label: "Cash In",   href: `/store/${storeId}/cashins?m=${m}` },
+    { label: "QBO Export",href: `/store/${storeId}/qbo-export?m=${m}` },
+    { label: "Settings",  href: `/store/${storeId}/settings` },
+  ];
 
   return (
-    <nav className="md:hidden flex gap-2 overflow-x-auto mt-2">
-      <Item href={`/store/${storeId}/dashboard`} id="dashboard" label="Dashboard" />
-      <Item href={`/store/${storeId}/entries`}    id="entries"   label="Entries" />
-      <Item href={`/store/${storeId}/admin`}      id="admin"     label="Admin" />
-      <Item href={`/store/${storeId}/qbo-export`} id="qbo"       label="QBO Export" />
-      <Item href={`/store/${storeId}/settings`}   id="settings"  label="Settings" />
+    <nav className="fixed bottom-0 inset-x-0 z-40 bg-white border-t shadow md:hidden">
+      <ul className="grid grid-cols-5 text-xs">
+        {items.map((it) => (
+          <li key={it.label}>
+            <Link
+              href={it.href}
+              className="flex flex-col items-center justify-center h-14 px-2 hover:bg-slate-50"
+            >
+              <span className="font-medium">{it.label}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </nav>
   );
 }

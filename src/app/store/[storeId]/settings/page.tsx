@@ -1,3 +1,4 @@
+// src/app/store/[storeId]/settings/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -75,10 +76,17 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen p-6 space-y-6">
+    // 1) main + bottom padding so content clears fixed nav
+    <main className="min-h-screen p-6 space-y-6 pb-24">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Settings → Accounts</h1>
-        <a href={`/store/${storeId}`} className="rounded-xl px-3 py-2 bg-white/10 hover:bg-white/20">Back to store</a>
+        {/* 2) REMOVE the MobileNav from the header (was here) */}
+        <a
+          href={`/store/${storeId}`}
+          className="rounded-xl px-3 py-2 bg-white/10 hover:bg-white/20"
+        >
+          Back to store
+        </a>
       </div>
 
       {err && <div className="text-red-400">{err}</div>}
@@ -87,21 +95,37 @@ export default function SettingsPage() {
         <div className="bg-brand-card p-4 rounded-2xl space-y-3">
           <h2 className="font-medium">Add single account</h2>
           <div className="flex gap-2">
-            <input className="flex-1 rounded-lg p-3 bg-black/40 outline-none"
-                   placeholder="e.g. 5100 Purchases:5120 Food Purchases"
-                   value={newName} onChange={(e)=>setNewName(e.target.value)} />
-            <button onClick={addSingle} disabled={busy}
-              className="rounded-xl px-4 py-2 bg-brand-accent/90 hover:bg-brand-accent text-black disabled:opacity-60">Add</button>
+            <input
+              className="flex-1 rounded-lg p-3 bg-black/40 outline-none"
+              placeholder="e.g. 5100 Purchases:5120 Food Purchases"
+              value={newName}
+              onChange={(e)=>setNewName(e.target.value)}
+            />
+            <button
+              onClick={addSingle}
+              disabled={busy}
+              className="rounded-xl px-4 py-2 bg-brand-accent/90 hover:bg-brand-accent text-black disabled:opacity-60"
+            >
+              Add
+            </button>
           </div>
         </div>
 
         <div className="bg-brand-card p-4 rounded-2xl space-y-3">
           <h2 className="font-medium">Bulk import (one per line)</h2>
-          <textarea className="w-full h-40 rounded-lg p-3 bg-black/40 outline-none"
-                    placeholder="Paste the Accounts column from your template (one per line)"
-                    value={bulk} onChange={(e)=>setBulk(e.target.value)} />
-          <button onClick={bulkImport} disabled={busy}
-            className="rounded-xl px-4 py-2 bg-brand-accent/90 hover:bg-brand-accent text-black disabled:opacity-60">Import</button>
+          <textarea
+            className="w-full h-40 rounded-lg p-3 bg-black/40 outline-none"
+            placeholder="Paste the Accounts column from your template (one per line)"
+            value={bulk}
+            onChange={(e)=>setBulk(e.target.value)}
+          />
+          <button
+            onClick={bulkImport}
+            disabled={busy}
+            className="rounded-xl px-4 py-2 bg-brand-accent/90 hover:bg-brand-accent text-black disabled:opacity-60"
+          >
+            Import
+          </button>
         </div>
       </div>
 
@@ -111,12 +135,21 @@ export default function SettingsPage() {
           {accounts.map(a => (
             <div key={a.id} className="py-2 flex items-center justify-between">
               <div className="font-mono text-sm">{a.name}</div>
-              <button onClick={()=>remove(a.id)} className="rounded-lg px-3 py-1 bg-white/10 hover:bg-white/20">Remove</button>
+              <button
+                onClick={()=>remove(a.id)}
+                className="rounded-lg px-3 py-1 bg-white/10 hover:bg-white/20"
+              >
+                Remove
+              </button>
             </div>
           ))}
           {accounts.length === 0 && <div className="opacity-70">No accounts yet.</div>}
         </div>
       </div>
-    </div>
+
+      {/* 3) Spacer + fixed mobile nav at the very bottom */}
+      <div className="h-16 md:hidden" />
+      <MobileNav storeId={String(storeId)} />
+    </main>
   );
 }
