@@ -19,6 +19,7 @@ import {
 
 import MonthPicker from "@/components/MonthPicker";
 import MobileNav from "@/components/MobileNav";
+// build-bump: 2025-11-12T14:00 no-op to trigger Vercel
 
 // ── Types ───────────────────────────────────────────────────────────
 type CashIn = {
