@@ -26,7 +26,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    // Never touch Firestore on the login route
+    // Do not touch Firestore when on /login
     if (isLogin) {
       setLoaded(true);
       return;
@@ -34,7 +34,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     const u = auth.currentUser;
     if (!u) {
-      // SessionGuard handles redirect; we don't fetch here.
+      // SessionGuard will redirect; nothing to fetch here.
       setLoaded(true);
       return;
     }
@@ -83,7 +83,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  const showSidebar = !isLogin && !isDashboard; // hide sidebar on dashboard
+  // Hide the sidebar on the dashboard (you’ll pick a store card there)
+  const showSidebar = !isLogin && !isDashboard;
 
   const Shell = (
     <div className={`min-h-screen grid grid-cols-1 ${showSidebar ? 'md:grid-cols-[240px_1fr]' : ''}`}>
@@ -98,7 +99,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <ManagerSidebar />
             </div>
           ) : (
-            // Admins keep your full SidebarNav (it can render Dashboard/Admin/QBO/Settings)
+            // Admins keep your full SidebarNav (Dashboard/Admin/QBO/Settings)
             <SidebarNav />
           )}
         </aside>
@@ -124,3 +125,4 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
+
