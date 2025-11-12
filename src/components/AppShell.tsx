@@ -15,8 +15,10 @@ import { doc, getDoc } from 'firebase/firestore';
 type Role = 'admin' | 'manager' | '';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const onLogin = pathname?.startsWith('/login');
+  const pathname = usePathname() || '';
+  const isLogin = pathname.startsWith('/login');
+  const isDashboard = pathname === '/dashboard';
+  const inStore = /^\/store\/[^/]+/.test(pathname);
 
   // ---- Membership (role + allowed stores) ----
   const [role, setRole] = useState<Role>('');
@@ -24,15 +26,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    // Do not touch Firestore when on /login (avoids any reads while signed out)
-    if (onLogin) {
+    // Do not touch Firestore when on /login
+    if (isLogin) {
       setLoaded(true);
       return;
     }
 
     const u = auth.currentUser;
     if (!u) {
-      // SessionGuard will handle redirect; nothing to fetch here.
+      // SessionGuard will redirect; nothing to fetch here.
       setLoaded(true);
       return;
     }
@@ -44,11 +46,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setAllowedStores(Array.isArray(data.storeIds) ? data.storeIds : []);
       })
       .finally(() => setLoaded(true));
-  }, [onLogin]);
+  }, [isLogin]);
 
   // infer current storeId from the URL ( …/store/[storeId]/… )
   const storeIdFromPath = useMemo(() => {
-    const m = pathname?.match(/\/store\/([^/]+)/);
+    const m = pathname.match(/\/store\/([^/]+)/);
     return (m && m[1]) || '';
   }, [pathname]);
 
@@ -67,8 +69,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </nav>
   );
 
-  // ---- Early return for login page (no shell, no providers) ----
-  if (onLogin) {
+  // ---- Early return for login page (no shell/providers) ----
+  if (isLogin) {
     return <main className="min-h-screen">{children}</main>;
   }
 
@@ -81,10 +83,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  return (
-    <StoreProvider>
-      <IdleLogout />
-      <div className="min-h-screen grid grid-cols-1 md:grid-cols-[240px_1fr]">
+  // Hide the sidebar on the dashboard (you’ll pick a store card there)
+  const showSidebar = !isLogin && !isDashboard;
+
+  const Shell = (
+    <div className={`min-h-screen grid grid-cols-1 ${showSidebar ? 'md:grid-cols-[240px_1fr]' : ''}`}>
+      {showSidebar && (
         <aside className="hidden md:block border-r bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60">
           <div className="p-4 text-base font-semibold tracking-wide">Petty Cash</div>
 
@@ -95,16 +99,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <ManagerSidebar />
             </div>
           ) : (
-            // Admins keep your full SidebarNav (it can render Dashboard/Admin/QBO/Settings)
+            // Admins keep your full SidebarNav (Dashboard/Admin/QBO/Settings)
             <SidebarNav />
           )}
         </aside>
+      )}
 
-        <div className="flex flex-col min-h-screen">
-          <TopBar />
-          <main className="p-4 md:p-8 flex-1">{children}</main>
-        </div>
+      <div className="flex flex-col min-h-screen">
+        <TopBar />
+        <main className="p-4 md:p-8 flex-1">{children}</main>
       </div>
+    </div>
+  );
+
+  // Only mount StoreProvider on store-scoped routes to avoid listeners without a storeId
+  return inStore ? (
+    <StoreProvider>
+      <IdleLogout />
+      {Shell}
     </StoreProvider>
+  ) : (
+    <>
+      <IdleLogout />
+      {Shell}
+    </>
   );
 }
+
