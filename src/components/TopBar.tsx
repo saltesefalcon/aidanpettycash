@@ -26,8 +26,12 @@ function swapStoreInPath(path: string, newId: string): string {
 
 export default function TopBar() {
   const r = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() || '';
   const search = useSearchParams();
+
+  // Hide the store selector on the dashboard
+  const onDashboard = pathname.startsWith('/dashboard');
+
   const [stores, setStores] = React.useState<StoreItem[]>([]);
   const [currentStoreId, setCurrentStoreId] = React.useState<string | null>(null);
   const [role, setRole] = React.useState<'admin' | 'manager' | null>(null);
@@ -86,9 +90,10 @@ export default function TopBar() {
       <div className="px-4 h-12 flex items-center justify-between gap-3">
         <div className="font-semibold">Petty Cash</div>
 
-        {/* Admin can switch; managers just see their current store */}
+        {/* Admin can switch; managers just see their current store.
+            The selector is hidden on the dashboard to avoid pre-store errors. */}
         <div className="flex items-center gap-3">
-          {stores.length > 0 && role === 'admin' ? (
+          {!onDashboard && stores.length > 0 && role === 'admin' ? (
             <select
               value={currentStoreId || ''}
               onChange={(e) => onSwitch(e.target.value)}
