@@ -58,3 +58,9 @@ next-env.d.ts
 
 *.off
 
+
+# ignore firebase / functions locally
+functions/
+firebase_functions/
+firebase_functions/node_modules/
+
