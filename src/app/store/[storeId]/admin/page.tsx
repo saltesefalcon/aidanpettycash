@@ -13,7 +13,7 @@ import {
   where,
   getDoc,
   getDocs,
-  onSnapshot,          // <-- add this
+  onSnapshot,
   Timestamp,
 } from "firebase/firestore";
 
@@ -43,7 +43,18 @@ type CashIn = {
   deletedByEmail?: string;
 };
 
-type Opening = { amount: number; note?: string; createdAt?: any };
+type Opening = {
+  amount: number;
+  note?: string;
+  createdAt?: any;
+  createdByUid?: string;
+  createdByName?: string;
+  createdByEmail?: string;
+  updatedAt?: any;
+  updatedByUid?: string;
+  updatedByName?: string;
+  updatedByEmail?: string;
+};
 
 type Deposit = {
   id?: string;
@@ -173,13 +184,26 @@ export default function AdminPage() {
   };
   const toTs = (yyyyMmDd: string) =>
     Timestamp.fromDate(new Date(`${yyyyMmDd}T00:00:00`));
-  // Safe getTime helper (works for Firestore Timestamps)
   const getTime = (val: any) => (val?.toDate ? val.toDate().getTime() : 0);
+  const fmtDate = (ts?: any) =>
+    ts?.toDate ? ts.toDate().toLocaleDateString("en-CA") : "";
+  const isoDate = (ts?: any) =>
+    ts?.toDate ? ts.toDate().toISOString().slice(0, 10) : "";
+
+  const me = () => {
+    const u = auth.currentUser;
+    return {
+      uid: u?.uid || "unknown",
+      name: u?.displayName || u?.email || "unknown",
+      email: u?.email || "",
+    };
+  };
 
   // ── Opening balance state ──────────────────────────────────────────
   const [openingAmt, setOpeningAmt] = useState<string>("");
   const [openingNote, setOpeningNote] = useState<string>("");
   const [openLoaded, setOpenLoaded] = useState(false);
+  const [openingMeta, setOpeningMeta] = useState<Partial<Opening> | null>(null);
 
   // ── Cash-in form ──────────────────────────────────────────────────
   const [ciDate, setCiDate] = useState(isoToday());
@@ -209,7 +233,7 @@ export default function AdminPage() {
   const [n100, setN100] = useState<string>("0");
   const [chg, setChg] = useState<string>("0");
   const [audits, setAudits] = useState<Audit[]>([]);
-  const [showAudit, setShowAudit] = useState<boolean>(false); // hidden by default
+  const [showAudit, setShowAudit] = useState<boolean>(false);
 
   // helpers + computed
   const num = (s: string) => Number.parseFloat(s || "0");
@@ -224,22 +248,21 @@ export default function AdminPage() {
   const [entriesSum, setEntriesSum] = useState<number>(0);
 
   // ── Opening (computed for summary card: override else prev month's closing) ──
-const [openingCard, setOpeningCard] = useState<number>(0);
+  const [openingCard, setOpeningCard] = useState<number>(0);
 
-useEffect(() => {
-  if (!storeId || !month) return;
-  (async () => {
-    try {
-      const v = await computeOpeningForMonth(String(storeId), month);
-      setOpeningCard(v);
-    } catch {
-      // no-op; leave card at 0 on error
-    }
-  })();
-}, [storeId, month]);
+  useEffect(() => {
+    if (!storeId || !month) return;
+    (async () => {
+      try {
+        const v = await computeOpeningForMonth(String(storeId), month);
+        setOpeningCard(v);
+      } catch {
+        // no-op
+      }
+    })();
+  }, [storeId, month]);
 
-
-  // Opening balance load
+  // Opening balance load (+ meta)
   useEffect(() => {
     if (!storeId || !month) return;
     setOpenLoaded(false);
@@ -252,9 +275,11 @@ useEffect(() => {
           const d = snap.data() as Opening;
           setOpeningAmt(String(d.amount ?? ""));
           setOpeningNote(d.note ?? "");
+          setOpeningMeta(d || null);
         } else {
           setOpeningAmt("");
           setOpeningNote("");
+          setOpeningMeta(null);
         }
       } catch (e: any) {
         setErr(e?.message || String(e));
@@ -264,7 +289,7 @@ useEffect(() => {
     })();
   }, [storeId, month]);
 
-  // Cash-ins by month (client sort; keep deleted in list for "Show deleted")
+  // Cash-ins by month
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
@@ -285,7 +310,7 @@ useEffect(() => {
     })();
   }, [storeId, month]);
 
-  // Deposits by month (tracker only)
+  // Deposits by month
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
@@ -321,35 +346,34 @@ useEffect(() => {
     })();
   }, [storeId, month]);
 
-// Sum entries (gross) for month (live, and ignore soft-deleted)
-useEffect(() => {
-  if (!storeId || !month) return;
+  // Sum entries (live, ignore soft-deleted)
+  useEffect(() => {
+    if (!storeId || !month) return;
 
-  const qy = query(
-    collection(db, "stores", String(storeId), "entries"),
-    where("month", "==", month)
-  );
+    const qy = query(
+      collection(db, "stores", String(storeId), "entries"),
+      where("month", "==", month)
+    );
 
-  const unsub = onSnapshot(
-    qy,
-    (snap) => {
-      let total = 0;
-      snap.forEach((d) => {
-        const x = d.data() as any;
-        if (x.deleted === true) return;       // <-- ignore soft-deleted
-        total += Number(x.amount || 0);
-      });
-      setEntriesSum(Number(total.toFixed(2)));
-    },
-    (e) => {
-      setErr(e?.message || String(e));
-      setEntriesSum(0);
-    }
-  );
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        let total = 0;
+        snap.forEach((d) => {
+          const x = d.data() as any;
+          if (x.deleted === true) return;
+          total += Number(x.amount || 0);
+        });
+        setEntriesSum(Number(total.toFixed(2)));
+      },
+      (e) => {
+        setErr(e?.message || String(e));
+        setEntriesSum(0);
+      }
+    );
 
-  return () => unsub();
-}, [storeId, month]);
-
+    return () => unsub();
+  }, [storeId, month]);
 
   // Totals (ignore deleted)
   const cashInSum = useMemo(
@@ -381,21 +405,6 @@ useEffect(() => {
 
   const variance = useMemo(() => Number((counted - closing).toFixed(2)), [counted, closing]);
 
-  const fmtDate = (ts?: any) =>
-    ts?.toDate ? ts.toDate().toLocaleDateString("en-CA") : "";
-
-  const isoDate = (ts?: any) =>
-    ts?.toDate ? ts.toDate().toISOString().slice(0, 10) : "";
-
-  const me = () => {
-    const u = auth.currentUser;
-    return {
-      uid: u?.uid || "unknown",
-      name: u?.displayName || u?.email || "unknown",
-      email: u?.email || "",
-    };
-  };
-
   function StatCard({
     label,
     value,
@@ -415,23 +424,57 @@ useEffect(() => {
   }
 
   // ── Save handlers ─────────────────────────────────────────────────
-  async function saveOpening(e: React.FormEvent) {
-    e.preventDefault();
-    if (!storeId || !month) return;
-    try {
-      setErr(null);
-      await setDoc(doc(db, "stores", storeId, "openingBalances", month), {
+async function saveOpening(e: React.FormEvent) {
+  e.preventDefault();
+  if (!storeId || !month) return;
+
+  try {
+    setErr(null);
+
+    const ref = doc(db, "stores", String(storeId), "openingBalances", month);
+    const existing = await getDoc(ref);
+    const user = me();
+    const now = Timestamp.now();
+
+    // keep original createdAt if the doc already exists
+    const preservedCreatedAt =
+      existing.exists() && (existing.data() as any).createdAt
+        ? (existing.data() as any).createdAt
+        : now;
+
+    await setDoc(
+      ref,
+      {
         amount: Number.parseFloat(openingAmt || "0"),
-        note: openingNote,
-        createdAt: Timestamp.now(),
-      });
-      const v = await computeOpeningForMonth(String(storeId), month);
-      setOpeningCard(v);
-      alert("Opening balance saved.");
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    }
+        note: openingNote || "",
+        createdAt: preservedCreatedAt, // immutable creator timestamp
+        updatedAt: now,
+        updatedByUid: user.uid,
+        updatedByName: user.name,
+        updatedByEmail: user.email,
+      },
+      { merge: true }
+    );
+
+    // reflect changes in UI immediately
+    setOpeningMeta((prev) => ({
+      ...(prev || {}),
+      amount: Number.parseFloat(openingAmt || "0"),
+      note: openingNote || "",
+      createdAt: preservedCreatedAt,
+      updatedAt: now,
+      updatedByUid: user.uid,
+      updatedByName: user.name,
+      updatedByEmail: user.email,
+    }));
+
+    // recompute the summary card
+    const v = await computeOpeningForMonth(String(storeId), month);
+    setOpeningCard(v);
+  } catch (e: any) {
+    setErr(e?.message || String(e));
   }
+}
 
   async function saveCashIn(e: React.FormEvent) {
     e.preventDefault();
@@ -456,7 +499,6 @@ useEffect(() => {
       setCiSource("");
       setCiNote("");
 
-      // refresh
       const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
@@ -489,7 +531,6 @@ useEffect(() => {
       setDepMethod("Bank");
       setDepNote("");
 
-      // refresh
       const qy = query(collection(db, "stores", storeId, "deposits"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Deposit[];
@@ -500,7 +541,6 @@ useEffect(() => {
     }
   }
 
-  // ── Audit save handler ──────────────────────────────────────────────
   const onSaveAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!storeId) return;
@@ -528,10 +568,8 @@ useEffect(() => {
 
       await addDoc(collection(db, "stores", storeId, "audits"), payload);
 
-      // reset quick fields
       setN5("0"); setN10("0"); setN20("0"); setN50("0"); setN100("0"); setChg("0");
 
-      // refresh list
       const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
@@ -542,7 +580,6 @@ useEffect(() => {
     }
   };
 
-  // ── Audit soft-delete handler ───────────────────────────────────────
   async function onDeleteAudit(a: Audit) {
     if (!storeId || !a?.id) return;
     if (!confirm("Delete this audit?")) return;
@@ -565,7 +602,6 @@ useEffect(() => {
         { merge: true }
       );
 
-      // refresh
       const qy = query(collection(db, "stores", storeId, "audits"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
@@ -576,7 +612,7 @@ useEffect(() => {
     }
   }
 
-  // ── Edit/Delete (soft delete) helpers ─────────────────────────────
+  // Edit/Delete helpers
   const [editingCashIn, setEditingCashIn] = useState<CashIn | null>(null);
   const [editingDeposit, setEditingDeposit] = useState<Deposit | null>(null);
 
@@ -598,7 +634,6 @@ useEffect(() => {
       } as any);
       setEditingCashIn(null);
 
-      // refresh
       const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
@@ -623,7 +658,6 @@ useEffect(() => {
         deletedByEmail: user.email,
       } as any);
 
-      // refresh
       const qy = query(collection(db, "stores", storeId, "cashins"), where("month", "==", month));
       const snap = await getDocs(qy);
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CashIn[];
@@ -688,53 +722,46 @@ useEffect(() => {
 
   if (!storeId) return <main className="p-6">No store selected.</main>;
 
-  // Compute opening for month m as either:
-// 1) explicit override in /openingBalances/{m}, else
-// 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev)
-async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
-  // 1) explicit override?
-  const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
-  if (openSnap.exists()) {
-    return Number(((openSnap.data() as any).amount ?? 0));
+  // Compute opening for month m:
+  // 1) explicit override in /openingBalances/{m}, else
+  // 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev, not deleted)
+  async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
+    const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
+    if (openSnap.exists()) {
+      return Number(((openSnap.data() as any).amount ?? 0));
+    }
+
+    const [yy, mm] = m.split("-").map(Number);
+    const prev = new Date(yy, (mm - 1) - 1, 1);
+    const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+
+    const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
+    const prevOpen = prevOpenSnap.exists()
+      ? Number(((prevOpenSnap.data() as any).amount ?? 0))
+      : 0;
+
+    const cinSnap = await getDocs(
+      query(collection(db, "stores", storeId, "cashins"), where("month", "==", pm))
+    );
+    let cin = 0;
+    cinSnap.forEach(d => {
+      const x = d.data() as any;
+      if (x.deleted === true) return;
+      cin += Number(x.amount || 0);
+    });
+
+    const outSnap = await getDocs(
+      query(collection(db, "stores", storeId, "entries"), where("month", "==", pm))
+    );
+    let out = 0;
+    outSnap.forEach((d) => {
+      const x = d.data() as any;
+      if (x.deleted === true) return;
+      out += Number(x.amount || 0);
+    });
+
+    return Number((prevOpen + cin - out).toFixed(2));
   }
-
-  // figure previous month key
-  const [yy, mm] = m.split("-").map(Number);
-  const prev = new Date(yy, (mm - 1) - 1, 1); // previous month
-  const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
-
-  // prev open (0 if never set)
-  const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
-  const prevOpen = prevOpenSnap.exists()
-    ? Number(((prevOpenSnap.data() as any).amount ?? 0))
-    : 0;
-
-  // sum cash-ins (skip soft-deleted)
-  const cinSnap = await getDocs(
-    query(collection(db, "stores", storeId, "cashins"), where("month", "==", pm))
-  );
-  let cin = 0;
-  cinSnap.forEach(d => {
-    const x = d.data() as any;
-    if (x.deleted === true) return;
-    cin += Number(x.amount || 0);
-  });
-
-// sum entries (cash-out) — ignore soft-deleted
-const outSnap = await getDocs(
-  query(collection(db, "stores", storeId, "entries"), where("month", "==", pm))
-);
-let out = 0;
-outSnap.forEach((d) => {
-  const x = d.data() as any;
-  if (x.deleted === true) return;
-  out += Number(x.amount || 0);
-});
-
-
-  return Number((prevOpen + cin - out).toFixed(2));
-}
-
 
   // ── UI ────────────────────────────────────────────────────────────
   return (
@@ -799,6 +826,57 @@ outSnap.forEach((d) => {
               Download CSV for {month}
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Opening balance override */}
+      <section className="rounded-lg border bg-white p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Opening balance override (optional)</h2>
+        </div>
+
+        <form onSubmit={saveOpening} className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-4xl items-end">
+          <div>
+            <label className="block text-sm mb-1">Amount</label>
+            <input
+              type="number"
+              step="0.01"
+              value={openingAmt}
+              onChange={(e) => setOpeningAmt(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              placeholder="e.g., 200.00"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm mb-1">Note</label>
+            <input
+              type="text"
+              value={openingNote}
+              onChange={(e) => setOpeningNote(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              placeholder="Why this override?"
+            />
+          </div>
+          <div className="md:col-span-3">
+            <button className="border px-4 py-2 rounded">Save opening balance</button>
+          </div>
+        </form>
+
+        {/* Meta */}
+        <div className="mt-2 text-xs text-gray-600">
+          {!openLoaded ? (
+            <span>Loading…</span>
+          ) : openingMeta ? (
+            <span>
+              {openingMeta.updatedAt?.toDate
+                ? `Last updated ${openingMeta.updatedAt.toDate().toLocaleString()} by ${openingMeta.updatedByName || openingMeta.updatedByEmail || 'unknown'}`
+                : openingMeta.createdAt?.toDate
+                ? `Set ${openingMeta.createdAt.toDate().toLocaleString()} by ${openingMeta.createdByName || openingMeta.createdByEmail || 'unknown'}`
+                : null}
+            </span>
+          ) : (
+            <span>No override saved for {month}.</span>
+          )}
         </div>
       </section>
 
@@ -906,7 +984,6 @@ outSnap.forEach((d) => {
                     ci.updatedByName || ci.updatedByEmail || (ci.updatedByUid ? `uid:${ci.updatedByUid}` : "");
 
                   if (editingCashIn?.id === ci.id) {
-                    // Inline edit row
                     return (
                       <tr key={ci.id} className="border-b last:border-b-0">
                         <td className="py-2 pr-4">
@@ -973,7 +1050,6 @@ outSnap.forEach((d) => {
                     );
                   }
 
-                  // Normal (non-edit) row
                   return (
                     <tr key={ci.id} className={`border-b last:border-b-0 ${rowClass}`}>
                       <td className="py-2 pr-4">{fmtDate(ci.date)}</td>
@@ -1320,8 +1396,9 @@ outSnap.forEach((d) => {
           </>
         )}
       </section>
-    <div className="h-16 md:hidden" />
-    <MobileNav storeId={String(storeId)} active="admin" />
+
+      <div className="h-16 md:hidden" />
+      <MobileNav storeId={String(storeId)} active="admin" />
     </main>
   );
 }
