@@ -20,14 +20,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === '/dashboard';
   const inStore = /^\/store\/[^/]+/.test(pathname);
 
+  // ✅ Treat scanner pages specially
+  const isScanner = pathname.startsWith('/scanner-demo') || pathname.startsWith('/scanner');
+
   // ---- Membership (role + allowed stores) ----
   const [role, setRole] = useState<Role>('');
   const [allowedStores, setAllowedStores] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    // Do not touch Firestore when on /login
-    if (isLogin) {
+    // Do not touch Firestore on /login or scanner routes
+    if (isLogin || isScanner) {
       setLoaded(true);
       return;
     }
@@ -46,7 +49,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setAllowedStores(Array.isArray(data.storeIds) ? data.storeIds : []);
       })
       .finally(() => setLoaded(true));
-  }, [isLogin]);
+  }, [isLogin, isScanner]);
 
   // infer current storeId from the URL ( …/store/[storeId]/… )
   const storeIdFromPath = useMemo(() => {
@@ -83,8 +86,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  // Hide the sidebar on the dashboard (you’ll pick a store card there)
-  const showSidebar = !isLogin && !isDashboard;
+  // Hide the sidebar on dashboard and scanner pages
+  const showSidebar = !isLogin && !isDashboard && !isScanner;
 
   const Shell = (
     <div className={`min-h-screen grid grid-cols-1 ${showSidebar ? 'md:grid-cols-[240px_1fr]' : ''}`}>
@@ -106,7 +109,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <div className="flex flex-col min-h-screen">
-        <TopBar />
+        {/* Hide TopBar on scanner routes (removes store switcher dropdown) */}
+        {!isScanner && <TopBar />}
         <main className="p-4 md:p-8 flex-1">{children}</main>
       </div>
     </div>
@@ -125,4 +129,3 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
-

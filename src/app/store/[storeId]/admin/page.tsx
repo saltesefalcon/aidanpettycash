@@ -256,6 +256,8 @@ export default function AdminPage() {
       try {
         const v = await computeOpeningForMonth(String(storeId), month);
         setOpeningCard(v);
+        setOpeningAmt("0");
+        setOpeningNote("Why this override?");
       } catch {
         // no-op
       }
@@ -424,6 +426,7 @@ export default function AdminPage() {
   }
 
   // ── Save handlers ─────────────────────────────────────────────────
+// ── Save handlers ─────────────────────────────────────────────────
 async function saveOpening(e: React.FormEvent) {
   e.preventDefault();
   if (!storeId || !month) return;
@@ -433,21 +436,23 @@ async function saveOpening(e: React.FormEvent) {
 
     const ref = doc(db, "stores", String(storeId), "openingBalances", month);
     const existing = await getDoc(ref);
+
     const user = me();
     const now = Timestamp.now();
-
-    // keep original createdAt if the doc already exists
     const preservedCreatedAt =
       existing.exists() && (existing.data() as any).createdAt
         ? (existing.data() as any).createdAt
         : now;
 
+    const amt = Number.parseFloat(openingAmt || "0");
+    const note = openingNote || "";
+
     await setDoc(
       ref,
       {
-        amount: Number.parseFloat(openingAmt || "0"),
-        note: openingNote || "",
-        createdAt: preservedCreatedAt, // immutable creator timestamp
+        amount: amt,
+        note,
+        createdAt: preservedCreatedAt, // never changes once created
         updatedAt: now,
         updatedByUid: user.uid,
         updatedByName: user.name,
@@ -456,21 +461,24 @@ async function saveOpening(e: React.FormEvent) {
       { merge: true }
     );
 
-    // reflect changes in UI immediately
-    setOpeningMeta((prev) => ({
-      ...(prev || {}),
-      amount: Number.parseFloat(openingAmt || "0"),
-      note: openingNote || "",
+    // refresh the summary card
+    const v = await computeOpeningForMonth(String(storeId), month);
+    setOpeningCard(v);
+
+    // ⬇️ Clear the two inputs after save
+    setOpeningAmt("");
+    setOpeningNote("");
+
+    // update the little meta line immediately
+    setOpeningMeta({
+      amount: amt,
+      note,
       createdAt: preservedCreatedAt,
       updatedAt: now,
       updatedByUid: user.uid,
       updatedByName: user.name,
       updatedByEmail: user.email,
-    }));
-
-    // recompute the summary card
-    const v = await computeOpeningForMonth(String(storeId), month);
-    setOpeningCard(v);
+    });
   } catch (e: any) {
     setErr(e?.message || String(e));
   }
@@ -863,21 +871,27 @@ async function saveOpening(e: React.FormEvent) {
         </form>
 
         {/* Meta */}
-        <div className="mt-2 text-xs text-gray-600">
-          {!openLoaded ? (
-            <span>Loading…</span>
-          ) : openingMeta ? (
-            <span>
-              {openingMeta.updatedAt?.toDate
-                ? `Last updated ${openingMeta.updatedAt.toDate().toLocaleString()} by ${openingMeta.updatedByName || openingMeta.updatedByEmail || 'unknown'}`
-                : openingMeta.createdAt?.toDate
-                ? `Set ${openingMeta.createdAt.toDate().toLocaleString()} by ${openingMeta.createdByName || openingMeta.createdByEmail || 'unknown'}`
-                : null}
-            </span>
-          ) : (
-            <span>No override saved for {month}.</span>
-          )}
-        </div>
+<div className="mt-2 text-xs text-gray-600 space-y-1">
+  {!openLoaded ? (
+    <div>Loading…</div>
+  ) : openingMeta ? (
+    <>
+      <div>
+        {openingMeta.updatedAt?.toDate
+          ? <>Last updated {openingMeta.updatedAt.toDate().toLocaleString()} by {openingMeta.updatedByName || openingMeta.updatedByEmail || 'unknown'}.</>
+          : openingMeta.createdAt?.toDate
+          ? <>Set {openingMeta.createdAt.toDate().toLocaleString()} by {openingMeta.createdByName || openingMeta.createdByEmail || 'unknown'}.</>
+          : null}
+      </div>
+
+      {typeof openingMeta.note === 'string' && openingMeta.note.trim() !== '' && (
+        <div className="italic text-gray-700">Note: {openingMeta.note}</div>
+      )}
+    </>
+  ) : (
+    <div>No override saved for {month}.</div>
+  )}
+</div>
       </section>
 
       {/* dismissible error */}

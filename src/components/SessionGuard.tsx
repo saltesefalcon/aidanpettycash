@@ -11,14 +11,20 @@ import { doc, getDoc } from 'firebase/firestore';
  * - Renders immediately on /login (no blocking).
  * - For all other routes, waits for auth.
  * - If role === "manager":
- *     • Only allow /store/[storeId]/entries
- *     • Only allow storeIds from memberships/{uid}.storeIds
- *     • Redirect to their first allowed store's Entries if needed
+ *     • Allow /store/[storeId]/entries for assigned stores
+ *     • Also allow global scanner routes: /scanner-demo and /scanner
+ *     • Otherwise redirect to their first allowed store's Entries
  */
 export default function SessionGuard({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathnameRaw = usePathname();
+  const pathname = pathnameRaw || '';
   const router = useRouter();
-  const onLogin = pathname?.startsWith('/login');
+
+  const onLogin = pathname.startsWith('/login');
+  // ✅ mark scanner routes as always allowed for managers
+  const isScanner =
+    pathname.startsWith('/scanner-demo') ||
+    pathname.startsWith('/scanner');
 
   const [ready, setReady] = useState(onLogin); // /login renders immediately
   const [role, setRole] = useState<'admin' | 'manager' | ''>('');
@@ -40,8 +46,8 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
         return;
       }
 
-      // Fetch membership (role + storeIds)
       try {
+        // Fetch membership (role + storeIds)
         const snap = await getDoc(doc(db, 'memberships', user.uid));
         const data = snap.data() || {};
         const r = (data.role as 'admin' | 'manager' | '') || '';
@@ -52,6 +58,11 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
 
         // Managers: enforce section + store ACL
         if (r === 'manager') {
+          // ✅ allow scanner routes without redirect
+          if (isScanner) {
+            return; // stay on /scanner-demo or /scanner
+          }
+
           // Match /store/[storeId]/[section?]
           const match = pathname.match(/^\/store\/([^/]+)(?:\/([^/?#]+))?/);
           const storeOnUrl = match?.[1] ?? '';
@@ -84,8 +95,8 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
 
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onLogin, pathname]);
+  }, [onLogin, isScanner, pathname]);
 
-  if (!ready) return null; // (optional) show a tiny skeleton here if you prefer
+  if (!ready) return null; // could render a tiny skeleton here
   return <>{children}</>;
 }
