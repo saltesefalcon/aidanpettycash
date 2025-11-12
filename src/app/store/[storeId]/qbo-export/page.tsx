@@ -128,8 +128,8 @@ export default function QboExportPage() {
       <pre className="bg-white border rounded p-3 overflow-auto text-xs whitespace-pre-wrap">
         {out || "Preview JSON will appear here."}
       </pre>
-      <div className="h-16 md:hidden" />   {/* spacer for the fixed mobile bar */}
-<MobileNav storeId={String(storeId)} />
+      <div className="h-16 md:hidden" />
+<MobileNav storeId={String(storeId)} active="qbo" />
 
     </main>
   );

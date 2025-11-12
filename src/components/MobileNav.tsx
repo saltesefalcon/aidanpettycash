@@ -1,77 +1,72 @@
+// src/components/MobileNav.tsx
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import clsx from "clsx";
 
-type Active = "dashboard" | "entries" | "admin" | "qbo" | "settings" ;
+type NavKey = "entries" | "admin" | "qbo" | "settings" | "dashboard";
 
 export default function MobileNav({
-  storeId = "",
+  storeId,
   active,
 }: {
-  storeId?: string;
-  active?: Active;
+  storeId: string;
+  active?: NavKey;
 }) {
   const pathname = usePathname();
 
-  // Map our tab keys to the actual route segment
-  const routeOf: Record<Active, string> = {
-    dashboard: "dashboard",
-    entries: "entries",
-    admin: "admin",
-    qbo: "qbo-export",
-    settings: "settings",
-    };
+  // Derive active tab if prop not supplied
+  const derived: NavKey | undefined =
+    active ??
+    (pathname?.startsWith(`/store/${storeId}/admin`)
+      ? "admin"
+      : pathname?.startsWith(`/store/${storeId}/qbo-export`)
+      ? "qbo"
+      : pathname?.startsWith(`/store/${storeId}/settings`)
+      ? "settings"
+      : pathname === "/dashboard"
+      ? "dashboard"
+      : pathname?.startsWith(`/store/${storeId}`)
+      ? "entries"
+      : undefined);
 
-  // Build hrefs: dashboard is global (/dashboard), all others are store-scoped
-  const hrefFor = (key: Active) =>
-    key === "dashboard" ? "/dashboard" : `/store/${storeId}/${routeOf[key]}`;
-
-  // If "active" not provided, infer it from the path (fallback)
-  const isActive = (key: Active) => {
-    if (active) return active === key;
-    if (key === "dashboard") return pathname === "/dashboard";
-    return pathname.startsWith(`/store/${storeId}/${routeOf[key]}`);
-  };
+  const Item = ({
+    k,
+    href,
+    label,
+  }: {
+    k: NavKey;
+    href: string;
+    label: string;
+  }) => (
+    <Link
+      href={href}
+      aria-current={derived === k ? "page" : undefined}
+      className={clsx(
+        "flex items-center justify-center py-3 text-sm",
+        derived === k ? "font-semibold text-white" : "font-medium text-white/80"
+      )}
+    >
+      {label}
+    </Link>
+  );
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-[999] md:hidden bg-white border-t border-gray-200"
-        style={{
-            // iOS safe area for the home indicator so the bar sits flush to the very bottom
-            paddingBottom: "env(safe-area-inset-bottom)",
-            }}
-            >
-      <div className="grid grid-cols-4 text-xs">
-        <Link
-          href={hrefFor("dashboard")}
-          className={`py-3 text-center ${isActive("dashboard") ? "font-semibold" : ""}`}
-        >
-          Dashboard
-        </Link>
-        <Link
-          href={hrefFor("entries")}
-          className={`py-3 text-center ${isActive("entries") ? "font-semibold" : ""}`}
-        >
-          Entries
-        </Link>
-        <Link
-          href={hrefFor("admin")}
-          className={`py-3 text-center ${isActive("admin") ? "font-semibold" : ""}`}
-        >
-          Admin
-        </Link>
-        <Link
-          href={hrefFor("qbo")}
-          className={`py-3 text-center ${isActive("qbo") ? "font-semibold" : ""}`}
-        >
-          QBO
-        </Link>
-        <Link
-          href={hrefFor("settings")}
-          className={`py-3 text-center ${isActive("settings") ? "font-semibold" : ""}`}
-        >
-          Settings
-        </Link>
+    <nav
+      className="
+        md:hidden fixed inset-x-0 bottom-0 z-50
+        border-t border-white/15
+        bg-black/80 backdrop-blur supports-[backdrop-filter]:bg-black/60
+        pb-[env(safe-area-inset-bottom)]  /* keep bar flush, pad inside for iOS home bar */
+      "
+    >
+      <div className="max-w-3xl mx-auto grid grid-cols-5">
+        <Item k="entries"   href={`/store/${storeId}`}            label="Entries" />
+        <Item k="admin"     href={`/store/${storeId}/admin`}      label="Admin" />
+        <Item k="qbo"       href={`/store/${storeId}/qbo-export`} label="QBO" />
+        <Item k="settings"  href={`/store/${storeId}/settings`}   label="Settings" />
+        <Item k="dashboard" href={`/dashboard`}                   label="Dashboard" />
       </div>
     </nav>
   );

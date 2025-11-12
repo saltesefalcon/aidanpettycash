@@ -24,20 +24,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const u = auth.currentUser;
-    if (!u) {
-      // SessionGuard should handle redirect; just render shell-less if login route.
+    // Do not touch Firestore when on /login (avoids any reads while signed out)
+    if (onLogin) {
       setLoaded(true);
       return;
     }
+
+    const u = auth.currentUser;
+    if (!u) {
+      // SessionGuard will handle redirect; nothing to fetch here.
+      setLoaded(true);
+      return;
+    }
+
     getDoc(doc(db, 'memberships', u.uid))
-      .then(s => {
+      .then((s) => {
         const data = s.data() || {};
         setRole((data.role as Role) || '');
         setAllowedStores(Array.isArray(data.storeIds) ? data.storeIds : []);
       })
       .finally(() => setLoaded(true));
-  }, []);
+  }, [onLogin]);
 
   // infer current storeId from the URL ( …/store/[storeId]/… )
   const storeIdFromPath = useMemo(() => {
@@ -60,7 +67,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </nav>
   );
 
-  // ---- Early return for login page ----
+  // ---- Early return for login page (no shell, no providers) ----
   if (onLogin) {
     return <main className="min-h-screen">{children}</main>;
   }

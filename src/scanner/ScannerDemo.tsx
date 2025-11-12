@@ -26,20 +26,19 @@ export default function ScannerDemo() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // --- rotate default (desktop = ON, mobile/tablet = OFF) ----------------------
-const isMobileLike = () =>
-  (typeof navigator !== "undefined") &&
-  ( /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1 );
+  const isMobileLike = () =>
+    (typeof navigator !== "undefined") &&
+    ( /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1 );
 
-const [rotate90, setRotate90] = useState<boolean>(() => {
-  const saved = (typeof window !== "undefined") ? localStorage.getItem("scanner:rotate90") : null;
-  if (saved !== null) return saved === "1";
-  return !isMobileLike(); // desktop default true, phones/tablets false
-});
+  const [rotate90, setRotate90] = useState<boolean>(() => {
+    const saved = (typeof window !== "undefined") ? localStorage.getItem("scanner:rotate90") : null;
+    if (saved !== null) return saved === "1";
+    return !isMobileLike(); // desktop default true, phones/tablets false
+  });
 
-useEffect(() => {
-  try { localStorage.setItem("scanner:rotate90", rotate90 ? "1" : "0"); } catch {}
-}, [rotate90]);
-
+  useEffect(() => {
+    try { localStorage.setItem("scanner:rotate90", rotate90 ? "1" : "0"); } catch {}
+  }, [rotate90]);
 
   // ---- URL params from opener ----
   const search = useSearchParams();
@@ -70,67 +69,56 @@ useEffect(() => {
   const [busy, setBusy] = useState(false);
   const [keepOpen, setKeepOpen] = useState(true); // keep camera window open after attach
 
-  // Prefer external/high-res webcam when multiple exist
-  async function pickBestVideoDeviceId(): Promise<string | undefined> {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const vids = devices.filter((d) => d.kind === "videoinput");
-    if (vids.length === 0) return undefined;
+  // --- Prefer the rear camera on mobile (with graceful fallbacks) -------------
+  async function getRearCameraStream(): Promise<MediaStream> {
+    // First, try explicit rear camera hints (great for iOS Safari)
+    const preferred: MediaStreamConstraints[] = [
+      { video: { facingMode: { exact: "environment" } }, audio: false },
+      { video: { facingMode: "environment" }, audio: false },
+    ];
+    for (const c of preferred) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(c);
+      } catch {}
+    }
 
-    const scored = vids
-      .map((d) => {
-        const label = (d.label || "").toLowerCase();
-        let score = 0;
-        if (label.includes("4k")) score += 4;
-        if (label.includes("hd")) score += 2;
-        if (label.includes("usb")) score += 1;
-        if (label.includes("integrated") || label.includes("internal")) score -= 3;
-        return { id: d.deviceId, score, label: d.label || "" };
-      })
-      .sort((a, b) => b.score - a.score);
+    // Next, get basic permission so labels are populated, then pick a "back" device
+    let temp: MediaStream | null = null;
+    try {
+      temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    } catch (e) {
+      // If that fails entirely, rethrow so caller can surface an error
+      throw e;
+    }
 
-    return (scored[0]?.id || vids[0].deviceId) ?? undefined;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const rear = devices.find(
+        d => d.kind === "videoinput" && /back|rear|environment|world/i.test(d.label)
+      );
+      if (rear) {
+        // stop the temp tracks before opening the chosen device
+        temp.getTracks().forEach(t => t.stop());
+        return await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: rear.deviceId } },
+          audio: false,
+        });
+      }
+    } catch {
+      // ignore and use temp below
+    }
+    // No obvious rear device found; use the temp stream as a last resort
+    return temp!;
   }
 
   async function startCamera() {
     setError(null);
 
-    // Unlock permission so labels are visible
-    let firstStream: MediaStream | null = null;
+    let media: MediaStream;
     try {
-      firstStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      media = await getRearCameraStream();
     } catch (e: any) {
       setError(e?.message ?? "Camera access failed");
-      return;
-    } finally {
-      firstStream?.getTracks().forEach((t) => t.stop());
-    }
-
-    // Choose the best device
-    let deviceId: string | undefined;
-    try {
-      deviceId = await pickBestVideoDeviceId();
-    } catch {}
-
-    // Open HD stream with graceful fallback
-    const trySets: MediaStreamConstraints[] = [
-      { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { exact: 1920 }, height: { exact: 1080 }, frameRate: { ideal: 15 } }, audio: false },
-      { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 }, frameRate: { ideal: 15 }, aspectRatio: 16 / 9 }, audio: false },
-      { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: 16 / 9 }, audio: false },
-      { video: true, audio: false },
-    ];
-
-    let media: MediaStream | null = null;
-    let lastErr: any = null;
-    for (const c of trySets) {
-      try {
-        media = await navigator.mediaDevices.getUserMedia(c);
-        break;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    if (!media) {
-      setError((lastErr as any)?.message ?? "Camera access failed");
       return;
     }
 
@@ -169,6 +157,7 @@ useEffect(() => {
     if (videoRef.current) {
       const v = videoRef.current;
       v.srcObject = media;
+      v.playsInline = true; // iOS Safari hint
       const p = v.play();
       if (p && typeof (p as any).catch === "function") (p as Promise<void>).catch(() => {});
     }
@@ -183,17 +172,17 @@ useEffect(() => {
   }
 
   function exitOrBack() {
-  // stop the camera first
-  stopCamera();
+    // stop the camera first
+    stopCamera();
 
-  // Try to close the popup/window if it was opened by Entries
-  try { window.close(); } catch {}
+    // Try to close the popup/window if it was opened by Entries
+    try { window.close(); } catch {}
 
-  // iOS Safari often replaces the current tab and won’t allow close().
-  // In that case, navigate back to the Entries page for this store/month.
-  const month = params.dateISO.slice(0, 7); // YYYY-MM
-  location.href = `/store/${params.storeId}/entries?m=${month}`;
-}
+    // iOS Safari often replaces the current tab and won’t allow close().
+    // In that case, navigate back to the Entries page for this store/month.
+    const month = params.dateISO.slice(0, 7); // YYYY-MM
+    location.href = `/store/${params.storeId}/entries?m=${month}`;
+  }
 
   // Downscale (+ optional grayscale) helper
   function toCompressedDataUrl(srcCanvas: HTMLCanvasElement): string {
@@ -240,30 +229,29 @@ useEffect(() => {
     if (!wctx) return;
     wctx.drawImage(v, 0, 0, work.width, work.height);
 
-// rotate into portrait only if enabled
-let srcForCompression: HTMLCanvasElement;
+    // rotate into portrait only if enabled
+    let srcForCompression: HTMLCanvasElement;
 
-if (rotate90) {
-  rotated.width = work.height;
-  rotated.height = work.width;
-  const rctx = rotated.getContext("2d");
-  if (!rctx) return;
-  rctx.save();
-  rctx.translate(rotated.width, 0);
-  rctx.rotate(Math.PI / 2);
-  rctx.imageSmoothingEnabled = true;
-  rctx.imageSmoothingQuality = "high";
-  rctx.drawImage(work, 0, 0);
-  rctx.restore();
-  srcForCompression = rotated;
-} else {
-  // keep original camera orientation
-  srcForCompression = work;
-}
+    if (rotate90) {
+      rotated.width = work.height;
+      rotated.height = work.width;
+      const rctx = rotated.getContext("2d");
+      if (!rctx) return;
+      rctx.save();
+      rctx.translate(rotated.width, 0);
+      rctx.rotate(Math.PI / 2);
+      rctx.imageSmoothingEnabled = true;
+      rctx.imageSmoothingQuality = "high";
+      rctx.drawImage(work, 0, 0);
+      rctx.restore();
+      srcForCompression = rotated;
+    } else {
+      // keep original camera orientation
+      srcForCompression = work;
+    }
 
-// compress (downscale + JPEG quality [+ optional grayscale])
-const jpegDataUrl = toCompressedDataUrl(srcForCompression);
-
+    // compress (downscale + JPEG quality [+ optional grayscale])
+    const jpegDataUrl = toCompressedDataUrl(srcForCompression);
 
     setPages((prev) => [...prev, jpegDataUrl]);
   }
@@ -327,13 +315,13 @@ const jpegDataUrl = toCompressedDataUrl(srcForCompression);
     alignItems: "center",
     justifyContent: "center",
   };
-const videoStyle: React.CSSProperties = {
-  maxWidth: "100%",
-  maxHeight: "100%",
-  objectFit: "contain",
-  background: "black",
-  transform: rotate90 ? "rotate(90deg)" : "none",
-};
+  const videoStyle: React.CSSProperties = {
+    maxWidth: "100%",
+    maxHeight: "100%",
+    objectFit: "contain",
+    background: "black",
+    transform: rotate90 ? "rotate(90deg)" : "none",
+  };
 
   const thumbStyle: React.CSSProperties = {
     width: 90,
@@ -364,28 +352,27 @@ const videoStyle: React.CSSProperties = {
             Camera {liveSize && <span style={{ marginLeft: 8, color: "#64748b", fontSize: 12 }}>• Live: {liveSize}</span>}
           </h2>
 
-<div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8 }}>
-  <label style={{ fontSize: 13, color: "#334155" }}>
-    <input
-      type="checkbox"
-      checked={keepOpen}
-      onChange={(e) => setKeepOpen(e.target.checked)}
-      style={{ marginRight: 6 }}
-    />
-    Keep window open after attach
-  </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8 }}>
+            <label style={{ fontSize: 13, color: "#334155" }}>
+              <input
+                type="checkbox"
+                checked={keepOpen}
+                onChange={(e) => setKeepOpen(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              Keep window open after attach
+            </label>
 
-  <label style={{ fontSize: 13, color: "#334155" }}>
-    <input
-      type="checkbox"
-      checked={rotate90}
-      onChange={(e) => setRotate90(e.target.checked)}
-      style={{ marginRight: 6 }}
-    />
-    Rotate preview 90°
-  </label>
-</div>
-
+            <label style={{ fontSize: 13, color: "#334155" }}>
+              <input
+                type="checkbox"
+                checked={rotate90}
+                onChange={(e) => setRotate90(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              Rotate preview 90°
+            </label>
+          </div>
 
           <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
             Tip: For multi-page receipts, capture all pages first, then click <b>Finish &amp; Attach</b>.
@@ -395,20 +382,19 @@ const videoStyle: React.CSSProperties = {
             <video ref={videoRef} style={videoStyle} playsInline muted />
           </div>
 
-<div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
-  {!stream ? (
-    <button onClick={startCamera} style={btn("blue")}>Start Camera</button>
-  ) : (
-    <>
-      <button onClick={capturePage} style={btn("green")}>Capture Page</button>
-      <button onClick={stopCamera} style={btn("gray")}>Stop Camera</button>
-    </>
-  )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+            {!stream ? (
+              <button onClick={startCamera} style={btn("blue")}>Start Camera</button>
+            ) : (
+              <>
+                <button onClick={capturePage} style={btn("green")}>Capture Page</button>
+                <button onClick={stopCamera} style={btn("gray")}>Stop Camera</button>
+              </>
+            )}
 
-  {/* New: always-visible exit button for mobile users */}
-  <button onClick={exitOrBack} style={btn("gray")}>Done / Back</button>
-</div>
-
+            {/* New: always-visible exit button for mobile users */}
+            <button onClick={exitOrBack} style={btn("gray")}>Done / Back</button>
+          </div>
 
           {error && <p style={{ color: "#dc2626", marginTop: 8 }}>{error}</p>}
         </div>
