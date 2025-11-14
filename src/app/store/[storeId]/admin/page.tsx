@@ -19,7 +19,7 @@ import {
 
 import MonthPicker from "@/components/MonthPicker";
 import MobileNav from "@/components/MobileNav";
-// build-bump: 2025-11-12T14:00 no-op to trigger Vercel
+// build-bump: 2025-11-12T15:40 ensure deploy picks up opening override reset + meta
 
 // ── Types ───────────────────────────────────────────────────────────
 type CashIn = {
@@ -425,57 +425,68 @@ export default function AdminPage() {
   }
 
   // ── Save handlers ─────────────────────────────────────────────────
-async function saveOpening(e: React.FormEvent) {
-  e.preventDefault();
-  if (!storeId || !month) return;
 
-  try {
-    setErr(null);
+  // ✅ OPENING OVERRIDE: preserve createdAt, record updatedBy*, recompute card,
+  // ✅ clear amount/note inputs after successful save, update meta so note appears
+  async function saveOpening(e: React.FormEvent) {
+    e.preventDefault();
+    if (!storeId || !month) return;
 
-    const ref = doc(db, "stores", String(storeId), "openingBalances", month);
-    const existing = await getDoc(ref);
-    const user = me();
-    const now = Timestamp.now();
+    try {
+      setErr(null);
 
-    // keep original createdAt if the doc already exists
-    const preservedCreatedAt =
-      existing.exists() && (existing.data() as any).createdAt
-        ? (existing.data() as any).createdAt
-        : now;
+      const ref = doc(db, "stores", String(storeId), "openingBalances", month);
+      const existing = await getDoc(ref);
+      const user = me();
+      const now = Timestamp.now();
 
-    await setDoc(
-      ref,
-      {
-        amount: Number.parseFloat(openingAmt || "0"),
+      // keep original createdAt if the doc already exists
+      const preservedCreatedAt =
+        existing.exists() && (existing.data() as any).createdAt
+          ? (existing.data() as any).createdAt
+          : now;
+
+      const amountNum = Number.isFinite(Number.parseFloat(openingAmt || "0"))
+        ? Number.parseFloat(openingAmt || "0")
+        : 0;
+
+      await setDoc(
+        ref,
+        {
+          amount: amountNum,
+          note: openingNote || "",
+          createdAt: preservedCreatedAt, // immutable creator timestamp
+          updatedAt: now,
+          updatedByUid: user.uid,
+          updatedByName: user.name,
+          updatedByEmail: user.email,
+        },
+        { merge: true }
+      );
+
+      // reflect changes in UI immediately
+      setOpeningMeta((prev) => ({
+        ...(prev || {}),
+        amount: amountNum,
         note: openingNote || "",
-        createdAt: preservedCreatedAt, // immutable creator timestamp
+        createdAt: preservedCreatedAt,
         updatedAt: now,
         updatedByUid: user.uid,
         updatedByName: user.name,
         updatedByEmail: user.email,
-      },
-      { merge: true }
-    );
+      }));
 
-    // reflect changes in UI immediately
-    setOpeningMeta((prev) => ({
-      ...(prev || {}),
-      amount: Number.parseFloat(openingAmt || "0"),
-      note: openingNote || "",
-      createdAt: preservedCreatedAt,
-      updatedAt: now,
-      updatedByUid: user.uid,
-      updatedByName: user.name,
-      updatedByEmail: user.email,
-    }));
+      // 🔁 recompute the summary card
+      const v = await computeOpeningForMonth(String(storeId), month);
+      setOpeningCard(v);
 
-    // recompute the summary card
-    const v = await computeOpeningForMonth(String(storeId), month);
-    setOpeningCard(v);
-  } catch (e: any) {
-    setErr(e?.message || String(e));
+      // 🧹 clear the inputs (what you pointed out wasn't happening)
+      setOpeningAmt("");
+      setOpeningNote("");
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
-}
 
   async function saveCashIn(e: React.FormEvent) {
     e.preventDefault();
@@ -870,10 +881,11 @@ async function saveOpening(e: React.FormEvent) {
           ) : openingMeta ? (
             <span>
               {openingMeta.updatedAt?.toDate
-                ? `Last updated ${openingMeta.updatedAt.toDate().toLocaleString()} by ${openingMeta.updatedByName || openingMeta.updatedByEmail || 'unknown'}`
+                ? `Last updated ${openingMeta.updatedAt.toDate().toLocaleString()} by ${openingMeta.updatedByName || openingMeta.updatedByEmail || "unknown"}`
                 : openingMeta.createdAt?.toDate
-                ? `Set ${openingMeta.createdAt.toDate().toLocaleString()} by ${openingMeta.createdByName || openingMeta.createdByEmail || 'unknown'}`
+                ? `Set ${openingMeta.createdAt.toDate().toLocaleString()} by ${openingMeta.createdByName || openingMeta.createdByEmail || "unknown"}`
                 : null}
+              {openingMeta.note ? ` • Note: ${openingMeta.note}` : ""}
             </span>
           ) : (
             <span>No override saved for {month}.</span>
