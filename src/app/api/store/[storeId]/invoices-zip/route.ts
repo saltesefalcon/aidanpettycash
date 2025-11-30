@@ -6,6 +6,7 @@ import { getAdminDb, getAdminBucket } from "@/lib/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// ---------- helpers ----------
 function safe(s: string, max = 80) {
   return (s || "")
     .replace(/[^\w.\-]+/g, "_")
@@ -21,10 +22,7 @@ function guessExt(urlOrName: string) {
   return ".pdf"; // scanner default
 }
 
-/**
- * Normalize a Storage URL (https or gs://) to a bucket object path.
- * Returns just the "object path" inside the bucket.
- */
+/** Normalize a Storage URL (https or gs://) to a bucket object path. */
 function objectPathFromUrl(url: string): string | null {
   if (!url) return null;
 
@@ -49,29 +47,37 @@ function objectPathFromUrl(url: string): string | null {
     }
   }
 
-  // Already a plain path?
+  // Fallback: strip host if it looks like a plain URL
   return url.replace(/^https?:\/\//, "").includes("/")
     ? url.replace(/^[^/]+\/+/, "")
     : url;
 }
 
-export async function GET(
-  req: Request,
-  { params }: { params: Record<string, string> }
-) {
-  try {
-    const db = getAdminDb();
-    const bucket = getAdminBucket();
+/** Pull /store/{storeId}/... out of the path */
+function storeIdFromUrl(url: string): string {
+  const parts = new URL(url).pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","invoices-zip"]
+  const i = parts.findIndex((p) => p === "store");
+  return i >= 0 ? parts[i + 1] : "";
+}
 
-    const storeId = (params.storeId || "").toLowerCase();
+// ---------- handler ----------
+export async function GET(req: Request) {
+  try {
+    const storeId = storeIdFromUrl(req.url).toLowerCase();
+    if (!storeId) {
+      return NextResponse.json({ error: "Missing storeId in path." }, { status: 400 });
+    }
+
     const { searchParams } = new URL(req.url);
     const m = searchParams.get("m"); // YYYY-MM
-
     if (!m || !/^\d{4}-\d{2}$/.test(m)) {
       return NextResponse.json({ error: "Provide m=YYYY-MM" }, { status: 400 });
     }
 
-    // Fetch entries for the month and collect invoice URLs
+    const db = getAdminDb();
+    const bucket = getAdminBucket();
+
+    // Grab monthly entries and collect invoice URLs
     const snap = await db
       .collection("stores")
       .doc(storeId)
@@ -94,7 +100,6 @@ export async function GET(
 
       const invoiceUrl =
         x.invoiceUrl || x.attachmentUrl || x.scanUrl || x.invoice?.url || x.attachment?.url;
-
       if (!invoiceUrl) return;
 
       const iso =
@@ -115,8 +120,8 @@ export async function GET(
       return NextResponse.json({ error: "No invoices found for that month." }, { status: 404 });
     }
 
+    // Build ZIP
     const zip = new JSZip();
-
     for (const it of items) {
       const objectPath = objectPathFromUrl(it.invoiceUrl!);
       if (!objectPath) continue;
@@ -132,12 +137,9 @@ export async function GET(
       zip.file(fname, buf);
     }
 
-    const out = await zip.generateAsync({
-      type: "nodebuffer",
-      compression: "DEFLATE",
-    });
-
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     const fnameZip = `invoices_${storeId}_${m}.zip`;
+
     return new NextResponse(out, {
       status: 200,
       headers: {
