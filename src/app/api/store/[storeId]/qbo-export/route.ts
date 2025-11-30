@@ -1,8 +1,8 @@
 // src/app/api/store/[storeId]/qbo-export/route.ts
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebase";
-import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { buildQboCsv } from "@/lib/export/qbo";
+import { getAdminDb } from "@/lib/admin";
+import { Timestamp } from "firebase-admin/firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,32 +65,37 @@ export async function GET(req: Request) {
   }
 
   try {
+    const adb = getAdminDb();
+
     const startTs = Timestamp.fromDate(new Date(`${from}T00:00:00`));
     const endTs = Timestamp.fromDate(new Date(`${to}T23:59:59`));
 
     // Load accounts (id -> name) so entries that stored an account *id* can be mapped to the display name
-    const acctSnap = await getDocs(collection(db, "stores", storeId, "accounts"));
+    const acctSnap = await adb
+      .collection("stores")
+      .doc(storeId)
+      .collection("accounts")
+      .get();
+
     const accountIdToName = new Map<string, string>();
     acctSnap.forEach((d) => {
-      const name =
-        (d.get("name") as string) ??
-        (d.get("fullName") as string) ??
-        (d.get("account") as string) ??
-        "";
+      const data = d.data() as any;
+      const name = data.name ?? data.fullName ?? data.account ?? "";
       if (name) accountIdToName.set(d.id, name);
     });
 
     // Entries
-    const entQ = query(
-      collection(db, "stores", storeId, "entries"),
-      where("date", ">=", startTs),
-      where("date", "<=", endTs)
-    );
-    const entSnap = await getDocs(entQ);
-    let entries = entSnap.docs
-  .map((d) => ({ id: d.id, ...(d.data() as any) }))
-  .filter((e: any) => e.deleted !== true); // <-- exclude soft-deleted entries
+    const entSnap = await adb
+      .collection("stores")
+      .doc(storeId)
+      .collection("entries")
+      .where("date", ">=", startTs)
+      .where("date", "<=", endTs)
+      .get();
 
+    let entries = entSnap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as any) }))
+      .filter((e: any) => e.deleted !== true); // exclude soft-deleted entries
 
     // Resolve account field to an allowed *name*
     entries = entries.map((e: any) => {
@@ -118,15 +123,17 @@ export async function GET(req: Request) {
     // Optional cash-ins
     let cashins: any[] = [];
     if (includeCashIns) {
-      const ciQ = query(
-        collection(db, "stores", storeId, "cashins"),
-        where("date", ">=", startTs),
-        where("date", "<=", endTs)
-      );
-      const ciSnap = await getDocs(ciQ);
+      const ciSnap = await adb
+        .collection("stores")
+        .doc(storeId)
+        .collection("cashins")
+        .where("date", ">=", startTs)
+        .where("date", "<=", endTs)
+        .get();
+
       cashins = ciSnap.docs
-  .map((d) => ({ id: d.id, ...(d.data() as any) }))
-  .filter((c: any) => c.deleted !== true); // <-- exclude soft-deleted cash-ins
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((c: any) => c.deleted !== true); // exclude soft-deleted cash-ins
 
       cashins.sort(
         (a: any, b: any) =>
