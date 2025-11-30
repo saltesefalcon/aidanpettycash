@@ -1,5 +1,5 @@
 // src/app/api/store/[storeId]/invoices-zip/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import JSZip from "jszip";
 import { getAdminDb, getAdminBucket } from "@/lib/admin";
 
@@ -50,12 +50,14 @@ function objectPathFromUrl(url: string): string | null {
   }
 
   // Already a plain path?
-  return url.replace(/^https?:\/\//, "").includes("/") ? url.replace(/^[^/]+\/+/, "") : url;
+  return url.replace(/^https?:\/\//, "").includes("/")
+    ? url.replace(/^[^/]+\/+/, "")
+    : url;
 }
 
 export async function GET(
-  req: NextRequest,
-  { params }: { params: { storeId: string } }
+  req: Request,
+  { params }: { params: Record<string, string> }
 ) {
   try {
     const db = getAdminDb();
