@@ -125,9 +125,9 @@ export async function GET(req: NextRequest, context: any) {
       zip.file(fname, buf);
     }
 
-    // JSZip -> Buffer -> ArrayBuffer (for web Response BodyInit)
+    // JSZip -> Buffer -> Blob (avoids ArrayBuffer/SharedArrayBuffer union types)
     const nodeBuf: Buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    const arrayBuf = nodeBuf.buffer.slice(nodeBuf.byteOffset, nodeBuf.byteOffset + nodeBuf.byteLength);
+    const blob = new Blob([nodeBuf], { type: "application/zip" });
 
     const fnameZip = `invoices_${storeId}_${m}.zip`;
     const headers = new Headers({
@@ -136,7 +136,7 @@ export async function GET(req: NextRequest, context: any) {
       "Cache-Control": "no-store",
     });
 
-    return new Response(arrayBuf, { status: 200, headers });
+    return new Response(blob, { status: 200, headers });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
   }
