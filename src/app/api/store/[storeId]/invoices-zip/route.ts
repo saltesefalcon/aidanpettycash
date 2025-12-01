@@ -1,12 +1,11 @@
 // src/app/api/store/[storeId]/invoices-zip/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import { getAdminDb, getAdminBucket } from "@/lib/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ---------- helpers ----------
 function safe(s: string, max = 80) {
   return (s || "")
     .replace(/[^\w.\-]+/g, "_")
@@ -47,37 +46,29 @@ function objectPathFromUrl(url: string): string | null {
     }
   }
 
-  // Fallback: strip host if it looks like a plain URL
+  // Already a plain path?
   return url.replace(/^https?:\/\//, "").includes("/")
     ? url.replace(/^[^/]+\/+/, "")
     : url;
 }
 
-/** Pull /store/{storeId}/... out of the path */
-function storeIdFromUrl(url: string): string {
-  const parts = new URL(url).pathname.split("/").filter(Boolean); // e.g. ["api","store","beacon","invoices-zip"]
-  const i = parts.findIndex((p) => p === "store");
-  return i >= 0 ? parts[i + 1] : "";
-}
-
-// ---------- handler ----------
-export async function GET(req: Request) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { storeId: string } }
+) {
   try {
-    const storeId = storeIdFromUrl(req.url).toLowerCase();
-    if (!storeId) {
-      return NextResponse.json({ error: "Missing storeId in path." }, { status: 400 });
-    }
+    const db = getAdminDb();
+    const bucket = getAdminBucket();
 
+    const storeId = (params.storeId || "").toLowerCase();
     const { searchParams } = new URL(req.url);
     const m = searchParams.get("m"); // YYYY-MM
+
     if (!m || !/^\d{4}-\d{2}$/.test(m)) {
       return NextResponse.json({ error: "Provide m=YYYY-MM" }, { status: 400 });
     }
 
-    const db = getAdminDb();
-    const bucket = getAdminBucket();
-
-    // Grab monthly entries and collect invoice URLs
+    // Fetch entries for the month and collect invoice URLs
     const snap = await db
       .collection("stores")
       .doc(storeId)
@@ -120,7 +111,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "No invoices found for that month." }, { status: 404 });
     }
 
-    // Build ZIP
+    // Build the ZIP in memory
     const zip = new JSZip();
     for (const it of items) {
       const objectPath = objectPathFromUrl(it.invoiceUrl!);
@@ -137,17 +128,19 @@ export async function GET(req: Request) {
       zip.file(fname, buf);
     }
 
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    const fnameZip = `invoices_${storeId}_${m}.zip`;
+    // NOTE: JSZip gives us a Node Buffer. Convert to ArrayBuffer for web Response.BodyInit.
+    const nodeBuf: Buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const arrayBuf = nodeBuf.buffer.slice(nodeBuf.byteOffset, nodeBuf.byteOffset + nodeBuf.byteLength);
 
-    return new NextResponse(out, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${fnameZip}"`,
-        "Cache-Control": "no-store",
-      },
+    const fnameZip = `invoices_${storeId}_${m}.zip`;
+    const headers = new Headers({
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="${fnameZip}"`,
+      "Cache-Control": "no-store",
     });
+
+    // In Next 13+/15, returning a standard Response is perfectly fine.
+    return new Response(arrayBuf, { status: 200, headers });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
   }
