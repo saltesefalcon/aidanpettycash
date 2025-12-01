@@ -1,25 +1,17 @@
 // src/app/api/store/[storeId]/journal-xlsx/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getAdminDb } from "@/lib/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest, context: any) {
   try {
     const db = getAdminDb();
 
-    // --- derive storeId from the path: /api/store/{storeId}/journal-xlsx ---
-    const url = new URL(req.url);
-    const parts = url.pathname.split("/").filter(Boolean); // ["api","store","{storeId}","journal-xlsx"]
-    const i = parts.findIndex((p) => p === "store");
-    const storeId = i >= 0 ? (parts[i + 1] || "").toLowerCase() : "";
-    if (!storeId) {
-      return NextResponse.json({ error: "Missing storeId in URL" }, { status: 400 });
-    }
-
-    const { searchParams } = url;
+    const storeId = String(context?.params?.storeId || "").toLowerCase();
+    const { searchParams } = new URL(req.url);
 
     // month OR arbitrary range (month wins if provided)
     const m = searchParams.get("m"); // YYYY-MM (optional)
@@ -158,7 +150,7 @@ export async function GET(req: Request) {
       ? `journal_${storeId}_${m}.xlsx`
       : `journal_${storeId}_${range.from}_${range.to}.xlsx`;
 
-    return new NextResponse(out as Buffer, {
+    return new Response(out as ArrayBuffer, {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

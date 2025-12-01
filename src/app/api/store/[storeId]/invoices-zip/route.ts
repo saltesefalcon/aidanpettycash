@@ -52,15 +52,12 @@ function objectPathFromUrl(url: string): string | null {
     : url;
 }
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { storeId: string } }
-) {
+export async function GET(req: NextRequest, context: any) {
   try {
     const db = getAdminDb();
     const bucket = getAdminBucket();
 
-    const storeId = (params.storeId || "").toLowerCase();
+    const storeId = String(context?.params?.storeId || "").toLowerCase();
     const { searchParams } = new URL(req.url);
     const m = searchParams.get("m"); // YYYY-MM
 
@@ -128,7 +125,7 @@ export async function GET(
       zip.file(fname, buf);
     }
 
-    // NOTE: JSZip gives us a Node Buffer. Convert to ArrayBuffer for web Response.BodyInit.
+    // JSZip -> Buffer -> ArrayBuffer (for web Response BodyInit)
     const nodeBuf: Buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     const arrayBuf = nodeBuf.buffer.slice(nodeBuf.byteOffset, nodeBuf.byteOffset + nodeBuf.byteLength);
 
@@ -139,7 +136,6 @@ export async function GET(
       "Cache-Control": "no-store",
     });
 
-    // In Next 13+/15, returning a standard Response is perfectly fine.
     return new Response(arrayBuf, { status: 200, headers });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
