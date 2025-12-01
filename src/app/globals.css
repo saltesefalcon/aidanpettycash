@@ -3,26 +3,26 @@
 @plugin "@tailwindcss/forms";
 @plugin "@tailwindcss/typography";
 
-/* ---- Base tweaks (optional) ---- */
+/* ---- Base tweaks (clean, warning-free) ---- */
 @layer base {
-  :root {
-    --brand: #0ea5e9;
-  }
+  :root { --brand: #0ea5e9; }
 
-  html, body {
-    max-width: 100vw;
-    overflow-x: hidden;
-  }
+  /* Prevent document-wide horizontal scrolling.
+     Sections that need it (e.g., journal table) use their own overflow-x-auto. */
+  html, body { max-width: 100vw; overflow-x: hidden; }
 
-  /* you can keep body styling in layout.tsx too; this is harmless */
-  body {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
+  /* Standards-based text scaling (avoid vendor warnings) */
+  html { text-size-adjust: 100%; }
 
-  a {
-    text-decoration: none;
-  }
+  a { text-decoration: none; }
+}
+
+/* Apply vendor font smoothing only when supported (prevents console warnings) */
+@supports (-webkit-font-smoothing: antialiased) {
+  body { -webkit-font-smoothing: antialiased; }
+}
+@supports (-moz-osx-font-smoothing: grayscale) {
+  body { -moz-osx-font-smoothing: grayscale; }
 }
 
 /* ---- Your reusable utilities/components (use @apply here) ---- */
@@ -45,7 +45,11 @@
                      focus:outline-none focus:ring-4 focus:ring-sky-500/30 disabled:opacity-50; }
   .btn-ghost { @apply inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-slate-100 hover:bg-white/10; }
 
+  /* Tables and horizontal scroll helpers */
   table.data      { @apply min-w-full text-sm; }
   table.data th   { @apply border-b border-white/10 px-3 py-2 text-left font-semibold text-slate-300; }
   table.data td   { @apply border-b border-white/5  px-3 py-2; }
+
+  /* Utility to force a horizontal scroll container when needed */
+  .x-scroll { @apply overflow-x-auto; }
 }

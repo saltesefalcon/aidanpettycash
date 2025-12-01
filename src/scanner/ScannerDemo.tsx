@@ -50,6 +50,7 @@ export default function ScannerDemo() {
   })();
   const department = (search.get("dept") || "FOH").toUpperCase();
   const category = search.get("category") || "Uncategorized";
+  const vendor = (search.get("vendor") || "Unknown").trim();
   const amount = (() => {
     const n = parseFloat(search.get("amount") || "0");
     return Number.isFinite(n) && n >= 0 ? n : 0;
@@ -266,7 +267,9 @@ export default function ScannerDemo() {
 
       const storage = getStorage();
       // deterministic object path => overwrites on re-scan
-      const path = `pettycash/${storeId}/${entryId}/invoice.pdf`;
+      const safe = (s: string) => s.replace(/[^\w.\-]+/g, "_").slice(0, 60);
+      const base = `${dateISO}_${safe(vendor)}_${entryId}`;
+      const path = `pettycash/${storeId}/${base}.pdf`;
       const sref = ref(storage, path);
       await uploadBytes(sref, pdfBlob, { contentType: "application/pdf" });
       const url = await getDownloadURL(sref);

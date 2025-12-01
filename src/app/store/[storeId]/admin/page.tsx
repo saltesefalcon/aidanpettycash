@@ -116,6 +116,11 @@ export default function AdminPage() {
   const [includeCashIns, setIncludeCashIns] = useState<boolean>(false);
   const [cashInCreditAccount, setCashInCreditAccount] = useState<string>("1000 Bank");
 
+  // Custom date range export (optional)
+const [rangeFrom, setRangeFrom] = useState<string>("");
+const [rangeTo, setRangeTo] = useState<string>("");
+
+
   // Fetch pretty store name for title
   useEffect(() => {
     if (!storeId) return;
@@ -175,6 +180,49 @@ export default function AdminPage() {
       "noopener,noreferrer"
     );
   }
+
+  // Preview (JSON) for an arbitrary date range
+function previewCsvForRangeClient() {
+  if (!storeId) return;
+  if (!rangeFrom || !rangeTo) { alert("Pick both dates."); return; }
+  if (rangeFrom > rangeTo) { alert("Start date must be before end date."); return; }
+
+  const params = new URLSearchParams({ from: rangeFrom, to: rangeTo, debug: "1", preview: "1" });
+
+  if (journalNo && journalNo.trim()) params.set("jn", journalNo.trim());
+  if (includeCashIns) {
+    params.set("includeCashIns", "1");
+    if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+  }
+
+  window.open(
+    `/api/store/${storeId}/qbo-export?${params.toString()}`,
+    "_blank",
+    "noopener,noreferrer"
+  );
+}
+
+// Download CSV for an arbitrary date range
+function downloadCsvForRangeClient() {
+  if (!storeId) return;
+  if (!rangeFrom || !rangeTo) { alert("Pick both dates."); return; }
+  if (rangeFrom > rangeTo) { alert("Start date must be before end date."); return; }
+
+  const params = new URLSearchParams({ from: rangeFrom, to: rangeTo });
+
+  if (journalNo && journalNo.trim()) params.set("jn", journalNo.trim());
+  if (includeCashIns) {
+    params.set("includeCashIns", "1");
+    if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+  }
+
+  window.open(
+    `/api/store/${storeId}/qbo-export?${params.toString()}`,
+    "_blank",
+    "noopener,noreferrer"
+  );
+}
+
 
   // ── Helpers ───────────────────────────────────────────────────────
   const isoToday = () => {

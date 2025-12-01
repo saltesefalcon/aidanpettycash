@@ -20,7 +20,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === '/dashboard';
   const inStore = /^\/store\/[^/]+/.test(pathname);
 
-  // ✅ Treat scanner pages specially
+  // Treat scanner pages specially
   const isScanner = pathname.startsWith('/scanner-demo') || pathname.startsWith('/scanner');
 
   // ---- Membership (role + allowed stores) ----
@@ -74,7 +74,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // ---- Early return for login page (no shell/providers) ----
   if (isLogin) {
-    return <main className="min-h-screen">{children}</main>;
+    return <main className="min-h-screen min-w-0 overflow-x-hidden">{children}</main>;
   }
 
   // Optional tiny shimmer while membership loads (keeps layout stable)
@@ -90,9 +90,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const showSidebar = !isLogin && !isDashboard && !isScanner;
 
   const Shell = (
-    <div className={`min-h-screen grid grid-cols-1 ${showSidebar ? 'md:grid-cols-[240px_1fr]' : ''}`}>
+    <div
+      className={`min-h-screen w-screen overflow-x-hidden grid grid-cols-1 ${
+        showSidebar ? 'md:grid-cols-[220px_minmax(0,1fr)]' : ''
+      }`}
+    >
       {showSidebar && (
-        <aside className="hidden md:block border-r bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+        <aside className="hidden md:block w-[220px] shrink-0 border-r bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60">
           <div className="p-4 text-base font-semibold tracking-wide">Petty Cash</div>
 
           {!loaded ? (
@@ -109,9 +113,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <div className="flex flex-col min-h-screen">
-        {/* Hide TopBar on scanner routes (removes store switcher dropdown) */}
-        {!isScanner && <TopBar />}
-        <main className="p-4 md:p-8 flex-1">{children}</main>
+        {/* Wrap so header can shrink/wrap instead of widening the page */}
+        {!isScanner && (
+          <div className="px-4 md:px-8 min-w-0">
+            <TopBar />
+          </div>
+        )}
+
+        {/* Main content: allow children to shrink within grid cell */}
+        <main className="p-4 md:p-8 flex-1 min-w-0">{children}</main>
       </div>
     </div>
   );

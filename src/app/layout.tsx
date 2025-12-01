@@ -8,7 +8,8 @@ import SessionGuard from '@/components/SessionGuard';
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-800 antialiased">
+      {/* Remove 'antialiased' to avoid vendor font-smoothing warnings */}
+      <body className="min-h-screen bg-slate-50 text-slate-800">
         <SessionGuard>
           <AppShell>{children}</AppShell>
         </SessionGuard>

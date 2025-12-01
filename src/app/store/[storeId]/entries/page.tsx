@@ -339,15 +339,17 @@ async function computeOpeningForMonth(storeId: string, m: string): Promise<numbe
     const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
     setScanNonce(nonce);
 
-    const params = new URLSearchParams({
-      store: String(storeId),
-      entry: useId,
-      date: dateStr || new Date().toISOString().slice(0, 10),
-      dept,
-      category: accountsMap.get(accountId) || accountId || "Uncategorized",
-      amount: amountStr || "0",
-      nonce,
-    });
+const params = new URLSearchParams({
+  store: String(storeId),
+  entry: useId,
+  date: dateStr || new Date().toISOString().slice(0, 10),
+  vendor: vendor || "", // <-- ADD THIS LINE
+  dept,
+  category: accountsMap.get(accountId) || accountId || "Uncategorized",
+  amount: amountStr || "0",
+  nonce,
+});
+
 
     window.open(`/scanner-demo?${params.toString()}`, "pc-scan", "width=1200,height=900");
   }
@@ -554,7 +556,7 @@ async function deleteRow(id: string) {
 
   // ===== UI =====
   return (
-    <main className="p-6 space-y-4 pb-24">
+    <main className="p-6 space-y-4 pb-24 max-w-screen-xl mx-auto">
       {/* Header + month picker */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <h1 className="text-2xl font-semibold mb-2 capitalize tracking-tight">
@@ -789,131 +791,116 @@ async function deleteRow(id: string) {
         </div>
       )}
 
-      {/* Journal */}
-      <section className="rounded-xl border bg-white">
-        <div className="p-4 border-b">
-          <h2 className="text-lg font-medium">Journal — {monthSel}</h2>
-        </div>
-        <div className="p-4 overflow-x-auto">
-            <div className="mb-2">
-    <label className="inline-flex items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        checked={showDeletedEntries}
-        onChange={(e) => setShowDeletedEntries(e.target.checked)}
-      />
-      Show deleted
-    </label>
+{/* Journal */}
+<section className="rounded-xl border bg-white">
+  <div className="p-4 border-b">
+    <h2 className="text-lg font-medium">Journal — {monthSel}</h2>
   </div>
-          <div className="min-w-[1000px]">
-            {jLoading ? (
-              <div className="text-sm text-gray-600">Loading…</div>
-            ) : journalErr ? (
-              <div className="text-sm text-red-700">{journalErr}</div>
-            ) : journal.filter((r) => showDeletedEntries || r.deleted !== true).length === 0 ? (
 
-              <div className="text-sm text-gray-600">No entries this month.</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-600">
-                    <th className="py-2 pr-4">Date</th>
-                    <th className="py-2 pr-4">Vendor</th>
-                    <th className="py-2 pr-4">Description</th>
-                    <th className="py-2 pr-4">Account</th>
-                    <th className="py-2 pr-4">Dept</th>
-                    <th className="py-2 pr-4">Invoice</th>
-                    <th className="py-2 pr-4 text-right">Net</th>
-                    <th className="py-2 pr-4 text-right">HST</th>
-                    <th className="py-2 pr-4 text-right">Total</th>
-                    <th className="py-2 pr-4"></th>
-                  </tr>
-                </thead>
+  <div className="p-4">
+    <div className="mb-2">
+      <label className="inline-flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={showDeletedEntries}
+          onChange={(e) => setShowDeletedEntries(e.target.checked)}
+        />
+        Show deleted
+      </label>
+    </div>
 
-                  <tbody>
-  {journal
-    .filter((r) => showDeletedEntries || r.deleted !== true)
-    .map((r) => {
+    {/* Only the table can scroll horizontally when needed */}
+    <div className="overflow-x-auto">
+      {jLoading ? (
+        <div className="text-sm text-gray-600">Loading…</div>
+      ) : journalErr ? (
+        <div className="text-sm text-red-700">{journalErr}</div>
+      ) : journal.filter((r) => showDeletedEntries || r.deleted !== true).length === 0 ? (
+        <div className="text-sm text-gray-600">No entries this month.</div>
+      ) : (
+        <table className="min-w-[1100px] table-fixed text-sm w-full">
+          {/* Fixed column widths keep edit inputs inside the row without stretching the page */}
+<colgroup><col className="w-[110px]"/><col className="w-[180px]"/><col className="w-[240px]"/><col className="w-[220px]"/><col className="w-[90px]"/><col className="w-[90px]"/><col className="w-[110px]"/><col className="w-[110px]"/><col className="w-[120px]"/><col className="w-[110px]"/></colgroup>
+          <thead>
+            <tr className="text-left text-gray-600">
+              <th className="py-2 pr-4">Date</th>
+              <th className="py-2 pr-4">Vendor</th>
+              <th className="py-2 pr-4">Description</th>
+              <th className="py-2 pr-4">Account</th>
+              <th className="py-2 pr-4">Dept</th>
+              <th className="py-2 pr-4">Invoice</th>
+              <th className="py-2 pr-4 text-right">Net</th>
+              <th className="py-2 pr-4 text-right">HST</th>
+              <th className="py-2 pr-4 text-right">Total</th>
+              <th className="py-2 pr-4"></th>
+            </tr>
+          </thead>
 
-                    const d: Date = r.date?.toDate?.() || new Date(r.date);
-                    const dStr = d.toISOString().slice(0, 10);
-                    const accountLabel = r.accountName || accountsMap.get(r.account) || r.account;
+          <tbody>
+            {journal
+              .filter((r) => showDeletedEntries || r.deleted !== true)
+              .map((r) => {
+                const d: Date = r.date?.toDate?.() || new Date(r.date);
+                const dStr = d.toISOString().slice(0, 10);
+                const accountLabel = r.accountName || accountsMap.get(r.account) || r.account;
 
-                    if (editingId === r.id && edit) {
-                      return (
-                        <tr key={r.id} className={`border-t align-top ${showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""}`}>
-                          <td className="py-2 pr-4">
-                            <input type="date" value={edit.dateStr} onChange={(e)=>setEdit({...edit, dateStr:e.target.value})} className="rounded border px-2 py-1" />
-                          </td>
-                          <td className="py-2 pr-4">
-                            <input value={edit.vendor} onChange={(e)=>setEdit({...edit, vendor:e.target.value})} className="rounded border px-2 py-1" />
-                          </td>
-                          <td className="py-2 pr-4">
-                            <input value={edit.description} onChange={(e)=>setEdit({...edit, description:e.target.value})} className="rounded border px-2 py-1" />
-                          </td>
-                          <td className="py-2 pr-4">
-                            <select value={edit.accountId} onChange={(e)=>setEdit({...edit, accountId:e.target.value})} className="rounded border px-2 py-1 bg-white">
-                              {accounts.map(a => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
-                            </select>
-                          </td>
-                          <td className="py-2 pr-4">
-                            <select value={edit.dept} onChange={(e)=>setEdit({...edit, dept:e.target.value as any})} className="rounded border px-2 py-1 bg-white">
-                              <option value="FOH">FOH</option>
-                              <option value="BOH">BOH</option>
-                              <option value="TRAVEL">TRAVEL</option>
-                              <option value="OTHER">OTHER</option>
-                              <option value="BANK">Bank Deposit</option>
-                            </select>
-                          </td>
-                          <td className="py-2 pr-4">
-                            {r.invoiceUrl ? (
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  className="underline"
-                                  onClick={() => {
-                                    setPreviewUrl(`${r.invoiceUrl}${r.invoiceUrl.includes("?") ? "&" : "?"}ts=${Date.now()}`);
-                                    setScanMode("edit");
-                                    setScanningForId(r.id);
-                                    setShowInvoice(true);
-                                  }}
-                                >
-                                  View
-                                </button>
-                                <a href={r.invoiceUrl} target="_blank" rel="noopener noreferrer" className="underline text-gray-600">
-                                  Open ⇗
-                                </a>
-                              </div>
-                            ) : <span className="text-xs text-gray-400">—</span>}
-                          </td>
-                          <td className="py-2 pr-4 text-right">
-                            <input inputMode="decimal" value={edit.amountStr ? (round2(Math.max(parseFloat(edit.amountStr||"0") - parseFloat(edit.hstStr||"0"),0))).toFixed(2) : "0.00"} readOnly className="rounded border px-2 py-1 bg-gray-50 text-right" />
-                          </td>
-                          <td className="py-2 pr-4 text-right">
-                            <input inputMode="decimal" value={edit.hstStr} onChange={(e)=>setEdit({...edit, hstStr:e.target.value})} className="rounded border px-2 py-1 text-right" />
-                          </td>
-                          <td className="py-2 pr-4 text-right">
-                            <input inputMode="decimal" value={edit.amountStr} onChange={(e)=>setEdit({...edit, amountStr:e.target.value})} className="rounded border px-2 py-1 text-right" />
-                          </td>
-                          <td className="py-2 pr-4">
-                            <div className="flex gap-2">
-                              <button className="underline" onClick={saveEdit} type="button">Save</button>
-                              <button className="underline" onClick={cancelEdit} type="button">Cancel</button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return (
-                      <tr key={r.id} className={`border-t ${showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""}`}>
-                        <td className="py-2 pr-4">{dStr}</td>
-                        <td className="py-2 pr-4">{r.vendor}</td>
-                        <td className="py-2 pr-4">{r.description}</td>
-                        <td className="py-2 pr-4">{accountLabel}</td>
-                        <td className="py-2 pr-4">{r.dept || ""}</td>
-                        <td className="py-2 pr-4">
-                          {r.invoiceUrl ? (
+                if (editingId === r.id && edit) {
+                  return (
+                    <tr
+                      key={r.id}
+                      className={`border-t align-top ${showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""}`}
+                    >
+                      <td className="py-2 pr-4">
+                        <input
+                          type="date"
+                          value={edit.dateStr}
+                          onChange={(e) => setEdit({ ...edit, dateStr: e.target.value })}
+                          className="w-full rounded border px-2 py-1"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <input
+                          value={edit.vendor}
+                          onChange={(e) => setEdit({ ...edit, vendor: e.target.value })}
+                          className="w-full rounded border px-2 py-1"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <input
+                          value={edit.description}
+                          onChange={(e) => setEdit({ ...edit, description: e.target.value })}
+                          className="w-full rounded border px-2 py-1"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <select
+                          value={edit.accountId}
+                          onChange={(e) => setEdit({ ...edit, accountId: e.target.value })}
+                          className="w-full rounded border px-2 py-1 bg-white"
+                        >
+                          {accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name || a.id}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <select
+                          value={edit.dept}
+                          onChange={(e) => setEdit({ ...edit, dept: e.target.value as any })}
+                          className="w-full rounded border px-2 py-1 bg-white"
+                        >
+                          <option value="FOH">FOH</option>
+                          <option value="BOH">BOH</option>
+                          <option value="TRAVEL">TRAVEL</option>
+                          <option value="OTHER">OTHER</option>
+                          <option value="BANK">Bank Deposit</option>
+                        </select>
+                      </td>
+                      <td className="py-2 pr-4">
+                        {r.invoiceUrl ? (
+                          <div className="flex items-center gap-2">
                             <button
                               type="button"
                               className="underline"
@@ -926,28 +913,160 @@ async function deleteRow(id: string) {
                             >
                               View
                             </button>
-                          ) : (
-                            <span className="text-xs text-gray-500">—</span>
-                          )}
-                        </td>
-                        <td className="py-2 pr-4 text-right">${Number(r.net).toFixed(2)}</td>
-                        <td className="py-2 pr-4 text-right">${Number(r.hst).toFixed(2)}</td>
-                        <td className="py-2 pr-4 text-right">${Number(r.amount).toFixed(2)}</td>
-                        <td className="py-2 pr-4">
-                          <div className="flex gap-3">
-                            <button className="underline" onClick={()=>beginEdit(r)} type="button">Edit</button>
-                            <button className="underline" onClick={()=>deleteRow(r.id)} type="button">Delete</button>
+                            <a
+                              href={r.invoiceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline text-gray-600"
+                            >
+                              Open ⇗
+                            </a>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      </section>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        <input
+                          inputMode="decimal"
+                          value={
+                            edit.amountStr
+                              ? (Math.max((parseFloat(edit.amountStr || "0") || 0) - (parseFloat(edit.hstStr || "0") || 0), 0)).toFixed(2)
+                              : "0.00"
+                          }
+                          readOnly
+                          className="w-full rounded border px-2 py-1 bg-gray-50 text-right"
+                        />
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        <input
+                          inputMode="decimal"
+                          value={edit.hstStr}
+                          onChange={(e) => setEdit({ ...edit, hstStr: e.target.value })}
+                          className="w-full rounded border px-2 py-1 text-right"
+                        />
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        <input
+                          inputMode="decimal"
+                          value={edit.amountStr}
+                          onChange={(e) => setEdit({ ...edit, amountStr: e.target.value })}
+                          className="w-full rounded border px-2 py-1 text-right"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <div className="flex gap-2">
+                          <button className="underline" onClick={saveEdit} type="button">
+                            Save
+                          </button>
+                          <button className="underline" onClick={cancelEdit} type="button">
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
+                  <tr key={r.id} className={`border-t ${showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""}`}>
+                    <td className="py-2 pr-4 whitespace-nowrap">{dStr}</td>
+                    <td className="py-2 pr-4 truncate">{r.vendor}</td>
+                    <td className="py-2 pr-4 truncate">{r.description}</td>
+                    <td className="py-2 pr-4 truncate">{accountLabel}</td>
+                    <td className="py-2 pr-4 whitespace-nowrap">{r.dept || ""}</td>
+                    <td className="py-2 pr-4">
+                      {r.invoiceUrl ? (
+                        <button
+                          type="button"
+                          className="underline"
+                          onClick={() => {
+                            setPreviewUrl(`${r.invoiceUrl}${r.invoiceUrl.includes("?") ? "&" : "?"}ts=${Date.now()}`);
+                            setScanMode("edit");
+                            setScanningForId(r.id);
+                            setShowInvoice(true);
+                          }}
+                        >
+                          View
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-500">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.net).toFixed(2)}</td>
+                    <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.hst).toFixed(2)}</td>
+                    <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.amount).toFixed(2)}</td>
+                    <td className="py-2 pr-4">
+                      <div className="flex gap-3">
+                        <button className="underline" onClick={() => beginEdit(r)} type="button">
+                          Edit
+                        </button>
+                        <button className="underline" onClick={() => deleteRow(r.id)} type="button">
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  </div>
+</section>
+
+      {/* --- Export tools --------------------------------------------------- */}
+<section className="rounded-lg border bg-white p-4 mt-6">
+  <h3 className="font-semibold mb-3">Exports</h3>
+  <div className="grid gap-3 sm:grid-cols-2">
+{/* Excel journal (no images) */}
+<button
+  type="button"
+  className="border px-3 py-2 rounded"
+  onClick={() => {
+    // Prevent IdleLogout from firing while the browser handles the download
+    try {
+      localStorage.setItem('pc_download_active', '1');
+      setTimeout(() => { try { localStorage.removeItem('pc_download_active'); } catch {} }, 15000);
+    } catch {}
+
+    window.open(
+      `/api/store/${storeId}/journal-xlsx?m=${monthSel}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }}
+>
+  Download Journal (Excel) — {monthSel}
+</button>
+
+{/* Invoices ZIP */}
+<button
+  type="button"
+  className="border px-3 py-2 rounded"
+  onClick={() => {
+    // Prevent IdleLogout from firing while the browser handles the download
+    try {
+      localStorage.setItem('pc_download_active', '1');
+      setTimeout(() => { try { localStorage.removeItem('pc_download_active'); } catch {} }, 15000);
+    } catch {}
+
+    window.open(
+      `/api/store/${storeId}/invoices-zip?m=${monthSel}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }}
+>
+  Download All Invoices (ZIP) — {monthSel}
+</button>
+
+  </div>
+  <p className="text-xs text-gray-600 mt-2">
+    Need a custom date range? Use Admin → QBO Export (date-range export).
+  </p>
+</section>
 
       {/* Recent quick list placeholder */}
       <section className="rounded-xl border bg-white">
