@@ -65,7 +65,7 @@ export async function GET(req: NextRequest, context: any) {
       return NextResponse.json({ error: "Provide m=YYYY-MM" }, { status: 400 });
     }
 
-    // Fetch entries for the month and collect invoice URLs
+    // Collect invoice files for the month
     const snap = await db
       .collection("stores")
       .doc(storeId)
@@ -108,7 +108,7 @@ export async function GET(req: NextRequest, context: any) {
       return NextResponse.json({ error: "No invoices found for that month." }, { status: 404 });
     }
 
-    // Build the ZIP in memory
+    // Build ZIP
     const zip = new JSZip();
     for (const it of items) {
       const objectPath = objectPathFromUrl(it.invoiceUrl!);
@@ -125,9 +125,15 @@ export async function GET(req: NextRequest, context: any) {
       zip.file(fname, buf);
     }
 
-    // JSZip -> Buffer -> Blob (avoids ArrayBuffer/SharedArrayBuffer union types)
-    const nodeBuf: Buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    const blob = new Blob([nodeBuf], { type: "application/zip" });
+    // JSZip -> Node Buffer -> pure ArrayBuffer (BodyInit-safe)
+    const nodeBuf: Buffer = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+    });
+    const arrayBuf: ArrayBuffer = nodeBuf.buffer.slice(
+      nodeBuf.byteOffset,
+      nodeBuf.byteOffset + nodeBuf.byteLength
+    );
 
     const fnameZip = `invoices_${storeId}_${m}.zip`;
     const headers = new Headers({
@@ -136,7 +142,7 @@ export async function GET(req: NextRequest, context: any) {
       "Cache-Control": "no-store",
     });
 
-    return new Response(blob, { status: 200, headers });
+    return new Response(arrayBuf, { status: 200, headers });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
   }
