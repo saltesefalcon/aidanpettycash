@@ -68,7 +68,15 @@ export default function ScannerDemo() {
   const [pages, setPages] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [keepOpen, setKeepOpen] = useState(true); // keep camera window open after attach
+  const [keepOpen, setKeepOpen] = useState(false); // keep camera window open after attach
+
+  // Ensure default is unchecked for everyone; clear any legacy persisted flag
+useEffect(() => {
+  try {
+    localStorage.removeItem("pc_keep_open");
+    localStorage.removeItem("pc_scanner_keepopen");
+  } catch {}
+}, []);
 
   // --- Prefer the rear camera on mobile (with graceful fallbacks) -------------
   async function getRearCameraStream(): Promise<MediaStream> {
