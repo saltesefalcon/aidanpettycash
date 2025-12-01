@@ -18,35 +18,23 @@ function guessExt(urlOrName: string) {
   if (u.includes(".pdf")) return ".pdf";
   if (u.includes(".jpg") || u.includes(".jpeg")) return ".jpg";
   if (u.includes(".png")) return ".png";
-  return ".pdf"; // scanner default
+  return ".pdf";
 }
 
 /** Normalize a Storage URL (https or gs://) to a bucket object path. */
 function objectPathFromUrl(url: string): string | null {
   if (!url) return null;
-
-  // gs://<bucket>/<path>
   if (url.startsWith("gs://")) {
-    try {
-      return url.replace(/^gs:\/\/[^/]+\//, "");
-    } catch {
-      return null;
-    }
+    try { return url.replace(/^gs:\/\/[^/]+\//, ""); } catch { return null; }
   }
-
-  // https://firebasestorage.googleapis.com/v0/b/<bucket>/o/<encodedPath>?...
   const idx = url.indexOf("/o/");
   if (idx !== -1) {
     try {
       const after = url.slice(idx + 3);
       const untilQ = after.split("?")[0];
       return decodeURIComponent(untilQ);
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
-
-  // Already a plain path?
   return url.replace(/^https?:\/\//, "").includes("/")
     ? url.replace(/^[^/]+\/+/, "")
     : url;
@@ -60,15 +48,13 @@ export async function GET(req: NextRequest, context: any) {
     const storeId = String(context?.params?.storeId || "").toLowerCase();
     const { searchParams } = new URL(req.url);
     const m = searchParams.get("m"); // YYYY-MM
-
     if (!m || !/^\d{4}-\d{2}$/.test(m)) {
       return NextResponse.json({ error: "Provide m=YYYY-MM" }, { status: 400 });
     }
 
-    // Collect invoice files for the month
+    // Gather invoice files
     const snap = await db
-      .collection("stores")
-      .doc(storeId)
+      .collection("stores").doc(storeId)
       .collection("entries")
       .where("month", "==", m)
       .get();
@@ -92,8 +78,7 @@ export async function GET(req: NextRequest, context: any) {
 
       const iso =
         x?.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ||
-        x?.isoDate ||
-        "";
+        x?.isoDate || "";
 
       items.push({
         id: d.id,
@@ -108,7 +93,7 @@ export async function GET(req: NextRequest, context: any) {
       return NextResponse.json({ error: "No invoices found for that month." }, { status: 404 });
     }
 
-    // Build ZIP
+    // Build ZIP in memory
     const zip = new JSZip();
     for (const it of items) {
       const objectPath = objectPathFromUrl(it.invoiceUrl!);
@@ -125,24 +110,22 @@ export async function GET(req: NextRequest, context: any) {
       zip.file(fname, buf);
     }
 
-    // JSZip -> Node Buffer -> pure ArrayBuffer (BodyInit-safe)
+    // JSZip -> Node Buffer
     const nodeBuf: Buffer = await zip.generateAsync({
       type: "nodebuffer",
       compression: "DEFLATE",
     });
-    const arrayBuf: ArrayBuffer = nodeBuf.buffer.slice(
-      nodeBuf.byteOffset,
-      nodeBuf.byteOffset + nodeBuf.byteLength
-    );
 
-    const fnameZip = `invoices_${storeId}_${m}.zip`;
+    // Send as Uint8Array (ArrayBufferView) to satisfy BodyInit typing
+    const body = new Uint8Array(nodeBuf);
+
     const headers = new Headers({
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${fnameZip}"`,
+      "Content-Disposition": `attachment; filename="invoices_${storeId}_${m}.zip"`,
       "Cache-Control": "no-store",
     });
 
-    return new Response(arrayBuf, { status: 200, headers });
+    return new Response(body, { status: 200, headers });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
   }
