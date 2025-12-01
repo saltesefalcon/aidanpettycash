@@ -1,20 +1,25 @@
 // src/app/api/store/[storeId]/journal-xlsx/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getAdminDb } from "@/lib/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { storeId: string } }
-) {
+export async function GET(req: Request) {
   try {
     const db = getAdminDb();
 
-    const storeId = (params.storeId || "").toLowerCase();
-    const { searchParams } = new URL(req.url);
+    // --- derive storeId from the path: /api/store/{storeId}/journal-xlsx ---
+    const url = new URL(req.url);
+    const parts = url.pathname.split("/").filter(Boolean); // ["api","store","{storeId}","journal-xlsx"]
+    const i = parts.findIndex((p) => p === "store");
+    const storeId = i >= 0 ? (parts[i + 1] || "").toLowerCase() : "";
+    if (!storeId) {
+      return NextResponse.json({ error: "Missing storeId in URL" }, { status: 400 });
+    }
+
+    const { searchParams } = url;
 
     // month OR arbitrary range (month wins if provided)
     const m = searchParams.get("m"); // YYYY-MM (optional)
