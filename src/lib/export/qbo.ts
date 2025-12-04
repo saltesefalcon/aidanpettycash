@@ -83,6 +83,8 @@ type BuildArgs = {
   journalNo?: string;              // may be blank
   journalDate: string;             // YYYY-MM-DD (use end of range)
   allowedAccounts?: string[];
+  pettyCashAccount?: string; // GL name for the offset line (defaulted below)
+
 };
 
 // Group and sum by account, then build one petty-cash CREDIT line at the end.
