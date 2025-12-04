@@ -441,7 +441,7 @@ const params = new URLSearchParams({
         amount: round2(amountNum),
         hst: round2(hstNum),
         net: round2(Math.max(amountNum - hstNum, 0)),
-        account: accountId,
+        account: accountsMap.get(accountId) || accountId,
         accountName: accountsMap.get(accountId) || "",
         dept,
         month,
@@ -494,30 +494,42 @@ const params = new URLSearchParams({
   }
   function cancelEdit() { setEditingId(null); setEdit(null); }
 
-  async function saveEdit() {
-    if (!editingId || !edit) return;
-    const payload = {
-      date: edit.dateStr,
-      vendor: edit.vendor.trim(),
-      description: edit.description.trim(),
-      amount: parseFloat(edit.amountStr || "0") || 0,
-      hst: parseFloat(edit.hstStr || "0") || 0,
-      accountId: edit.accountId,
-      accountName: accountsMap.get(edit.accountId) || "",
-      dept: edit.dept,
-    };
-    const res = await fetch(`/api/store/${storeId}/entries/${editingId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      alert(`Update failed (${res.status}): ${await res.text()}`);
-      return;
-    }
-    setEditingId(null); setEdit(null);
-    await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
+async function saveEdit() {
+  if (!editingId || !edit) return;
+
+  // one set of numbers only
+  const amount = parseFloat(edit.amountStr || "0") || 0;
+  const hst    = parseFloat(edit.hstStr   || "0") || 0;
+
+  const payload = {
+    date: edit.dateStr,
+    vendor: edit.vendor.trim(),
+    description: edit.description.trim(),
+    amount: round2(amount),
+    hst: round2(hst),
+    net: round2(Math.max(amount - hst, 0)),
+    // save the label if we have it, else the id
+    account: accountsMap.get(edit.accountId) || edit.accountId,
+    accountName: accountsMap.get(edit.accountId) || "",
+    dept: edit.dept,
+  };
+
+  const res = await fetch(`/api/store/${storeId}/entries/${editingId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    alert(`Update failed (${res.status}): ${await res.text()}`);
+    return;
   }
+
+  setEditingId(null);
+  setEdit(null);
+  await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
+}
+
 
 async function deleteRow(id: string) {
   if (!confirm("Delete this entry?")) return;
