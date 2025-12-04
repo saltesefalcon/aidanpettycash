@@ -9,15 +9,22 @@ export const dynamic = "force-dynamic";
 
 // Keep in sync with the template Accounts list
 const ALLOWED_ACCOUNTS = new Set<string>([
+  "0000 Misc",
   "5110 Purchases:Beer Purchases",
   "5120 Purchases:Food Purchases",
-  "6010 Accounting",
+  "6110 Administration:Office and admin",
+  "6150 Administration:Vehicle operating expenses",
+  "6180 Administration:Travel Expenses",
+  "6440 Operations:Operating supplies",
+  "6445 Operations:Smallwares",
+  "5200 Supplier Rebates",
   "5130 Purchases:Liquor Purchases",
   "5160 Purchases:Wine Purchases",
   "5250 Purchases:Purchases - Merchandise",
   "5260 Supplier Rebate",
+  "5260 Purchases:Supplier Rebate",
   "6000 Administration",
-  "1050 Petty Cash",
+  "2430 Server Due Backs",
 ]);
 
 // Optional ASCII sanitizer (Excel-safe)
@@ -84,6 +91,30 @@ export async function GET(req: Request) {
       if (name) accountIdToName.set(d.id, name);
     });
 
+
+
+    // Per-store petty cash GL name
+const PETTY_CASH_BY_STORE: Record<string, string> = {
+  beacon: "1001 Petty Cash",
+  tulia: "1001 Petty Cash",
+  prohibition: "1001 Petty Cash",
+  cesoir: "1050 Petty Cash",
+};
+
+// Choose the store’s petty-cash account
+const pettyCashAccount =
+  PETTY_CASH_BY_STORE[(storeId.toLowerCase?.() || storeId)] || "1050 Petty Cash";
+
+// Live Accounts (names) from Settings → Accounts
+const liveAccounts = Array.from(new Set<string>(accountIdToName.values()).values());
+
+// Union of static + live + this store’s petty cash
+const MERGED_ALLOWED = new Set<string>([
+  ...ALLOWED_ACCOUNTS,
+  ...liveAccounts,
+  pettyCashAccount,
+]);
+
     // Entries
     const entSnap = await adb
       .collection("stores")
@@ -97,21 +128,21 @@ export async function GET(req: Request) {
       .map((d) => ({ id: d.id, ...(d.data() as any) }))
       .filter((e: any) => e.deleted !== true); // exclude soft-deleted entries
 
-    // Resolve account field to an allowed *name*
-    entries = entries.map((e: any) => {
-      let acc: string =
-        (e.account as string) ||
-        (e.accountName as string) ||
-        accountIdToName.get(e.accountId) ||
-        "";
-      if (acc && !ALLOWED_ACCOUNTS.has(acc)) {
-        const mapped =
-          accountIdToName.get(acc) ||
-          (e.accountId ? accountIdToName.get(e.accountId) : undefined);
-        if (mapped) acc = mapped;
-      }
-      return { ...e, account: acc };
-    });
+// Resolve account field to an allowed *name*
+entries = entries.map((e: any) => {
+  let acc: string =
+    (e.account as string) ||
+    (e.accountName as string) ||
+    accountIdToName.get(e.accountId) ||
+    "";
+  if (acc && !MERGED_ALLOWED.has(acc)) {
+    const mapped =
+      accountIdToName.get(acc) ||
+      (e.accountId ? accountIdToName.get(e.accountId) : undefined);
+    if (mapped) acc = mapped;
+  }
+  return { ...e, account: acc };
+});
 
     // Sort by date
     entries.sort(
@@ -149,7 +180,7 @@ export async function GET(req: Request) {
       for (const e of entries) {
         const acct = String(e.account || "").trim();
         if (acct) used.add(acct);
-        const badName = !acct || !ALLOWED_ACCOUNTS.has(acct);
+        const badName = !acct || !MERGED_ALLOWED.has(acct);
         const pettyOnExpenseLine = acct === "1050 Petty Cash";
         if (badName || pettyOnExpenseLine) {
           invalid.push({
@@ -176,15 +207,18 @@ export async function GET(req: Request) {
 
     // DEBUG preview
     if (debug && preview) {
-      const csv0 = buildQboCsv({
-        entries,
-        cashins,
-        includeCashIns,
-        cashInCreditAccount,
-        storeId,
-        journalNo,
-        journalDate: to!,
-      });
+const csv0 = buildQboCsv({
+  entries,
+  cashins,
+  includeCashIns,
+  cashInCreditAccount,
+  storeId,
+  journalNo,
+  journalDate: to!,
+  allowedAccounts: Array.from(MERGED_ALLOWED),
+pettyCashAccount,
+});
+
       const csv = ascii ? toAscii(csv0) : csv0;
       const lines = csv.split(/\r?\n/).filter(Boolean);
       const cols = (line: string) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
@@ -209,15 +243,18 @@ export async function GET(req: Request) {
     }
 
     // REAL CSV
-    const csv0 = buildQboCsv({
-      entries,
-      cashins,
-      includeCashIns,
-      cashInCreditAccount,
-      storeId,
-      journalNo,
-      journalDate: to!,
-    });
+const csv0 = buildQboCsv({
+  entries,
+  cashins,
+  includeCashIns,
+  cashInCreditAccount,
+  storeId,
+  journalNo,
+  journalDate: to!,
+  allowedAccounts: Array.from(MERGED_ALLOWED),
+pettyCashAccount,
+});
+
     const csv = ascii ? toAscii(csv0) : csv0;
 
     const BOM = "\uFEFF";

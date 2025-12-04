@@ -31,13 +31,21 @@ const HEADER = ["*JournalNo","*JournalDate","*AccountName","*Debits","*Credits",
 const ALLOWED_ACCOUNTS = new Set<string>([
   "5110 Purchases:Beer Purchases",
   "5120 Purchases:Food Purchases",
-  "6010 Accounting",
+  "6010 Administration:Accounting",
   "5130 Purchases:Liquor Purchases",
   "5160 Purchases:Wine Purchases",
   "5250 Purchases:Purchases - Merchandise",
-  "5260 Supplier Rebate",
-  "6000 Administration",
+  "5260 Purchases:Supplier Rebate",
+  "5200 Supplier Rebates",
+  "1001 Petty Cash",
   "1050 Petty Cash",
+  "0000 Misc",
+  "6110 Administration:Office and admin",
+  "6140 Administration:Transportation Expenses",
+  "6150 Administration:Vehicle operating expenses",
+  "6440 Operations:Operating supplies",
+  "6445 Operations:Smallwares",
+  "2430 Server Due Backs",
 ]);
 
 // Utility — normalize Firestore Timestamp/Date to "YYYY-MM-DD"
@@ -74,6 +82,7 @@ type BuildArgs = {
   storeId: string;
   journalNo?: string;              // may be blank
   journalDate: string;             // YYYY-MM-DD (use end of range)
+  allowedAccounts?: string[];
 };
 
 // Group and sum by account, then build one petty-cash CREDIT line at the end.
@@ -86,24 +95,41 @@ export function buildQboCsv({
   storeId,
   journalNo = "",
   journalDate,
+  allowedAccounts,                                // NEW
+  pettyCashAccount = "1050 Petty Cash", // <-- ADD THIS DEFAULT
 }: BuildArgs): string {
+  // Merge static list with any live names passed in
+  const allowedSet = new Set<string>(ALLOWED_ACCOUNTS);
+  if (Array.isArray(allowedAccounts)) {
+    for (const name of allowedAccounts) {
+      const n = (name ?? "").toString().trim();
+      if (n) allowedSet.add(n);
+    }
+  }
+
   // --- Validate & normalize entries ---
   const byAccount = new Map<string, {
     debit: number; tax: number; descPieces: string[];
   }>();
 
   for (const e of entries || []) {
-    const gross = Number(e.amount || 0);
-    const tax   = Number(e.hst || 0);
-    const acct  = String(e.account || "").trim();
+const gross = Number(e.amount || 0);
+const tax   = Number(e.hst || 0);
 
-    if (!acct || !ALLOWED_ACCOUNTS.has(acct)) {
-      throw new Error(`Entry uses account "${acct}", which is not in the allowed Accounts list.`);
-    }
-    if (acct === "1050 Petty Cash") {
-      // The expense lines must debit expense accounts; we reserve Petty Cash for the single CREDIT line.
-      throw new Error(`Entry points to "1050 Petty Cash". Please select an expense account from the Accounts list.`);
-    }
+// Prefer the human-readable name if it exists; fall back to whatever is stored in `account`.
+const rawAccount = String((e as any).account || "").trim();
+const acct       = String((e as any).accountName || rawAccount).trim();
+
+if (!acct || !allowedSet.has(acct)) {
+  throw new Error(
+    `[qbo-export] Error: Entry uses account "${rawAccount}" (normalized: "${acct}"), which is not in the allowed Accounts list.`
+  );
+}
+
+// NEW — block whichever petty-cash account this store uses
+if (acct === pettyCashAccount) {
+  throw new Error(`Expense lines cannot use ${pettyCashAccount}. Please select an expense account from the Accounts list.`);
+}
 
     if (!byAccount.has(acct)) {
       byAccount.set(acct, { debit: 0, tax: 0, descPieces: [] });
@@ -155,7 +181,8 @@ export function buildQboCsv({
     // If totalDebits > 0, we credit petty cash; if < 0 (overall rebate), we debit petty cash.
     const debit = totalDebits < 0 ? pettyCashCredit.toFixed(2) : "";
     const credit = totalDebits > 0 ? pettyCashCredit.toFixed(2) : "";
-    push([journalNo, journalDate, "1050 Petty Cash", debit, credit, `${storeId} petty cash offset`, "", "0.00"]);
+    // NEW
+  push([journalNo, journalDate, pettyCashAccount, debit, credit, `${storeId} petty cash offset`, "", "0.00"]);
   }
 
   // Stringify to CSV with CRLF line endings for Excel/QuickBooks friendliness

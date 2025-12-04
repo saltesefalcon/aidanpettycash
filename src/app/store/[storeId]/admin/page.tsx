@@ -837,57 +837,115 @@ function downloadCsvForRangeClient() {
         <StatCard label="Deposits (tracker)" value={depositsSum} />
       </div>
 
-      {/* Filters / Export controls */}
-      <section className="rounded-lg border bg-white p-4">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
-          <div>
-            <label className="block text-sm mb-1">Month</label>
-            <MonthPicker value={month} onChange={setMonth} />
-          </div>
+{/* Filters / Export controls */}
+<section className="rounded-lg border bg-white p-4">
+  {/* Month export (existing) */}
+  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
+    <div>
+      <label className="block text-sm mb-1">Month</label>
+      <MonthPicker value={month} onChange={setMonth} />
+    </div>
 
-          <div>
-            <label className="block text-sm mb-1">Journal # (optional)</label>
-            <input
-              type="text"
-              value={journalNo}
-              onChange={(e) => setJournalNo(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              placeholder="e.g., PC-20251012"
-            />
-          </div>
+    <div>
+      <label className="block text-sm mb-1">Journal # (optional)</label>
+      <input
+        type="text"
+        value={journalNo}
+        onChange={(e) => setJournalNo(e.target.value)}
+        className="border px-3 py-2 rounded w-full"
+        placeholder="e.g., PC-20251012"
+      />
+    </div>
 
-          <div>
-            <label className="block text-sm mb-1">Cash-in credit account</label>
-            <input
-              type="text"
-              value={cashInCreditAccount}
-              onChange={(e) => setCashInCreditAccount(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              disabled={!includeCashIns}
-              placeholder="1000 Bank"
-            />
-          </div>
+    <div>
+      <label className="block text-sm mb-1">Cash-in credit account</label>
+      <input
+        type="text"
+        value={cashInCreditAccount}
+        onChange={(e) => setCashInCreditAccount(e.target.value)}
+        className="border px-3 py-2 rounded w-full"
+        disabled={!includeCashIns}
+        placeholder="1000 Bank"
+      />
+    </div>
 
-          <div className="flex gap-2 md:justify-end">
-            <button
-              type="button"
-              className="border px-3 py-2 rounded"
-              onClick={previewCsvForMonthClient}
-              title="Open a JSON preview with sample lines and balance totals"
-            >
-              Preview CSV
-            </button>
-            <button
-              type="button"
-              className="border px-3 py-2 rounded"
-              onClick={downloadCsvForMonthClient}
-              title="Download the actual CSV"
-            >
-              Download CSV for {month}
-            </button>
-          </div>
-        </div>
-      </section>
+    <div className="flex gap-2 md:justify-end">
+      <button
+        type="button"
+        className="border px-3 py-2 rounded"
+        onClick={previewCsvForMonthClient}
+        title="Open a JSON preview with sample lines and balance totals"
+      >
+        Preview CSV
+      </button>
+      <button
+        type="button"
+        className="border px-3 py-2 rounded"
+        onClick={downloadCsvForMonthClient}
+        title="Download the actual CSV"
+      >
+        Download CSV for {month}
+      </button>
+    </div>
+  </div>
+
+  {/* Divider */}
+  <hr className="my-4" />
+
+  {/* Custom date range export (new) */}
+  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
+    <div>
+      <label className="block text-sm mb-1">From (YYYY-MM-DD)</label>
+      <input
+        type="date"
+        value={rangeFrom}
+        onChange={(e) => setRangeFrom(e.target.value)}
+        className="border px-3 py-2 rounded w-full"
+      />
+    </div>
+    <div>
+      <label className="block text-sm mb-1">To (YYYY-MM-DD)</label>
+      <input
+        type="date"
+        value={rangeTo}
+        onChange={(e) => setRangeTo(e.target.value)}
+        className="border px-3 py-2 rounded w-full"
+      />
+    </div>
+
+    {/* Re-use the same cash-in toggle that affects both month and range exports */}
+    <div className="flex items-center gap-2">
+      <label className="inline-flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={includeCashIns}
+          onChange={(e) => setIncludeCashIns(e.target.checked)}
+        />
+        Include cash-ins in QBO export
+      </label>
+    </div>
+
+    <div className="flex gap-2 md:justify-end">
+      <button
+        type="button"
+        className="border px-3 py-2 rounded"
+        onClick={previewCsvForRangeClient}
+        title="Open a JSON preview for this date range"
+      >
+        Preview CSV (range)
+      </button>
+      <button
+        type="button"
+        className="border px-3 py-2 rounded"
+        onClick={downloadCsvForRangeClient}
+        title="Download CSV for this date range"
+      >
+        Download CSV (range)
+      </button>
+    </div>
+  </div>
+</section>
+
 
       {/* Opening balance override */}
       <section className="rounded-lg border bg-white p-4">
