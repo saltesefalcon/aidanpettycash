@@ -216,7 +216,6 @@ const csv0 = buildQboCsv({
   journalNo,
   journalDate: to!,
   allowedAccounts: Array.from(MERGED_ALLOWED),
-pettyCashAccount,
 });
 
       const csv = ascii ? toAscii(csv0) : csv0;
@@ -252,7 +251,6 @@ const csv0 = buildQboCsv({
   journalNo,
   journalDate: to!,
   allowedAccounts: Array.from(MERGED_ALLOWED),
-pettyCashAccount,
 });
 
     const csv = ascii ? toAscii(csv0) : csv0;
