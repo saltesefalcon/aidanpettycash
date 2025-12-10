@@ -19,10 +19,34 @@ import {
 
 import MonthPicker from "@/components/MonthPicker";
 import MobileNav from "@/components/MobileNav";
-// build-bump: 2025-11-12T15:40 ensure deploy picks up opening override reset + meta
+import { ClosingBalanceAuditSection } from "@/components/ClosingBalanceAudit";
+
+// build-bump: 2025-12-09T14:30 add Cash Submitted section + keep denominations as calculator
 
 // ── Types ───────────────────────────────────────────────────────────
 type CashIn = {
+  id?: string;
+  date: any;
+  amount: number;
+  source?: string;
+  note?: string;
+  month?: string;
+  createdAt?: any;
+  createdByUid?: string;
+  createdByName?: string;
+  createdByEmail?: string;
+  updatedAt?: any;
+  updatedByUid?: string;
+  updatedByName?: string;
+  updatedByEmail?: string;
+  deleted?: boolean;
+  deletedAt?: any;
+  deletedByUid?: string;
+  deletedByName?: string;
+  deletedByEmail?: string;
+};
+
+type CashSubmitted = {
   id?: string;
   date: any;
   amount: number;
@@ -117,9 +141,8 @@ export default function AdminPage() {
   const [cashInCreditAccount, setCashInCreditAccount] = useState<string>("1000 Bank");
 
   // Custom date range export (optional)
-const [rangeFrom, setRangeFrom] = useState<string>("");
-const [rangeTo, setRangeTo] = useState<string>("");
-
+  const [rangeFrom, setRangeFrom] = useState<string>("");
+  const [rangeTo, setRangeTo] = useState<string>("");
 
   // Fetch pretty store name for title
   useEffect(() => {
@@ -182,47 +205,46 @@ const [rangeTo, setRangeTo] = useState<string>("");
   }
 
   // Preview (JSON) for an arbitrary date range
-function previewCsvForRangeClient() {
-  if (!storeId) return;
-  if (!rangeFrom || !rangeTo) { alert("Pick both dates."); return; }
-  if (rangeFrom > rangeTo) { alert("Start date must be before end date."); return; }
+  function previewCsvForRangeClient() {
+    if (!storeId) return;
+    if (!rangeFrom || !rangeTo) { alert("Pick both dates."); return; }
+    if (rangeFrom > rangeTo) { alert("Start date must be before end date."); return; }
 
-  const params = new URLSearchParams({ from: rangeFrom, to: rangeTo, debug: "1", preview: "1" });
+    const params = new URLSearchParams({ from: rangeFrom, to: rangeTo, debug: "1", preview: "1" });
 
-  if (journalNo && journalNo.trim()) params.set("jn", journalNo.trim());
-  if (includeCashIns) {
-    params.set("includeCashIns", "1");
-    if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+    if (journalNo && journalNo.trim()) params.set("jn", journalNo.trim());
+    if (includeCashIns) {
+      params.set("includeCashIns", "1");
+      if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+    }
+
+    window.open(
+      `/api/store/${storeId}/qbo-export?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
 
-  window.open(
-    `/api/store/${storeId}/qbo-export?${params.toString()}`,
-    "_blank",
-    "noopener,noreferrer"
-  );
-}
+  // Download CSV for an arbitrary date range
+  function downloadCsvForRangeClient() {
+    if (!storeId) return;
+    if (!rangeFrom || !rangeTo) { alert("Pick both dates."); return; }
+    if (rangeFrom > rangeTo) { alert("Start date must be before end date."); return; }
 
-// Download CSV for an arbitrary date range
-function downloadCsvForRangeClient() {
-  if (!storeId) return;
-  if (!rangeFrom || !rangeTo) { alert("Pick both dates."); return; }
-  if (rangeFrom > rangeTo) { alert("Start date must be before end date."); return; }
+    const params = new URLSearchParams({ from: rangeFrom, to: rangeTo });
 
-  const params = new URLSearchParams({ from: rangeFrom, to: rangeTo });
+    if (journalNo && journalNo.trim()) params.set("jn", journalNo.trim());
+    if (includeCashIns) {
+      params.set("includeCashIns", "1");
+      if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+    }
 
-  if (journalNo && journalNo.trim()) params.set("jn", journalNo.trim());
-  if (includeCashIns) {
-    params.set("includeCashIns", "1");
-    if (cashInCreditAccount) params.set("cashInCreditAccount", cashInCreditAccount);
+    window.open(
+      `/api/store/${storeId}/qbo-export?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
-
-  window.open(
-    `/api/store/${storeId}/qbo-export?${params.toString()}`,
-    "_blank",
-    "noopener,noreferrer"
-  );
-}
-
 
   // ── Helpers ───────────────────────────────────────────────────────
   const isoToday = () => {
@@ -254,6 +276,13 @@ function downloadCsvForRangeClient() {
   const [openLoaded, setOpenLoaded] = useState(false);
   const [openingMeta, setOpeningMeta] = useState<Partial<Opening> | null>(null);
 
+  // ── Cash Submitted form ───────────────────────────────────────────
+  const [csDate, setCsDate] = useState(isoToday());
+  const [csAmount, setCsAmount] = useState<string>("");
+  const [csSource, setCsSource] = useState<string>("");
+  const [csNote, setCsNote] = useState<string>("");
+  const [showDeletedCashSubmitted, setShowDeletedCashSubmitted] = useState(false);
+
   // ── Cash-in form ──────────────────────────────────────────────────
   const [ciDate, setCiDate] = useState(isoToday());
   const [ciAmount, setCiAmount] = useState<string>("");
@@ -268,7 +297,7 @@ function downloadCsvForRangeClient() {
   const [depNote, setDepNote] = useState<string>("");
   const [showDeletedDeposits, setShowDeletedDeposits] = useState(false);
 
-  // ── Audit form ────────────────────────────────────────────────────
+  // ── Audit form (denomination calculator) ──────────────────────────
   const [auditDate, setAuditDate] = useState(() => {
     const t = new Date();
     const mm = String(t.getMonth() + 1).padStart(2, "0");
@@ -293,6 +322,7 @@ function downloadCsvForRangeClient() {
 
   // ── Data (lists & rollups) ────────────────────────────────────────
   const [cashIns, setCashIns] = useState<CashIn[]>([]);
+  const [cashSubmitted, setCashSubmitted] = useState<CashSubmitted[]>([]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [entriesSum, setEntriesSum] = useState<number>(0);
 
@@ -338,6 +368,27 @@ function downloadCsvForRangeClient() {
     })();
   }, [storeId, month]);
 
+  // Cash Submitted by month
+  useEffect(() => {
+    if (!storeId || !month) return;
+    (async () => {
+      try {
+        setErr(null);
+        const qy = query(
+          collection(db, "stores", String(storeId), "cashSubmitted"),
+          where("month", "==", month)
+        );
+        const snap = await getDocs(qy);
+        const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as CashSubmitted[];
+        rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
+        setCashSubmitted(rows);
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+        setCashSubmitted([]);
+      }
+    })();
+  }, [storeId, month]);
+
   // Cash-ins by month
   useEffect(() => {
     if (!storeId || !month) return;
@@ -377,7 +428,7 @@ function downloadCsvForRangeClient() {
     })();
   }, [storeId, month]);
 
-  // Audits by month
+  // Audits by month (denomination snapshots)
   useEffect(() => {
     if (!storeId || !month) return;
     (async () => {
@@ -452,8 +503,6 @@ function downloadCsvForRangeClient() {
     [opening, cashInSum, entriesSum]
   );
 
-  const variance = useMemo(() => Number((counted - closing).toFixed(2)), [counted, closing]);
-
   function StatCard({
     label,
     value,
@@ -474,8 +523,6 @@ function downloadCsvForRangeClient() {
 
   // ── Save handlers ─────────────────────────────────────────────────
 
-  // ✅ OPENING OVERRIDE: preserve createdAt, record updatedBy*, recompute card,
-  // ✅ clear amount/note inputs after successful save, update meta so note appears
   async function saveOpening(e: React.FormEvent) {
     e.preventDefault();
     if (!storeId || !month) return;
@@ -488,7 +535,6 @@ function downloadCsvForRangeClient() {
       const user = me();
       const now = Timestamp.now();
 
-      // keep original createdAt if the doc already exists
       const preservedCreatedAt =
         existing.exists() && (existing.data() as any).createdAt
           ? (existing.data() as any).createdAt
@@ -503,7 +549,7 @@ function downloadCsvForRangeClient() {
         {
           amount: amountNum,
           note: openingNote || "",
-          createdAt: preservedCreatedAt, // immutable creator timestamp
+          createdAt: preservedCreatedAt,
           updatedAt: now,
           updatedByUid: user.uid,
           updatedByName: user.name,
@@ -512,7 +558,6 @@ function downloadCsvForRangeClient() {
         { merge: true }
       );
 
-      // reflect changes in UI immediately
       setOpeningMeta((prev) => ({
         ...(prev || {}),
         amount: amountNum,
@@ -524,13 +569,49 @@ function downloadCsvForRangeClient() {
         updatedByEmail: user.email,
       }));
 
-      // 🔁 recompute the summary card
       const v = await computeOpeningForMonth(String(storeId), month);
       setOpeningCard(v);
 
-      // 🧹 clear the inputs (what you pointed out wasn't happening)
       setOpeningAmt("");
       setOpeningNote("");
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }
+
+  // Cash Submitted save
+  async function saveCashSubmitted(e: React.FormEvent) {
+    e.preventDefault();
+    if (!storeId || !csAmount) return;
+    try {
+      setErr(null);
+      const when = Timestamp.fromDate(new Date(`${csDate}T00:00:00`));
+      const user = me();
+      await addDoc(collection(db, "stores", String(storeId), "cashSubmitted"), {
+        date: when,
+        amount: Number.parseFloat(csAmount),
+        source: csSource,
+        note: csNote,
+        month,
+        createdAt: Timestamp.now(),
+        createdByUid: user.uid,
+        createdByName: user.name,
+        createdByEmail: user.email,
+        deleted: false,
+      });
+
+      setCsAmount("");
+      setCsSource("");
+      setCsNote("");
+
+      const qy = query(
+        collection(db, "stores", String(storeId), "cashSubmitted"),
+        where("month", "==", month)
+      );
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as CashSubmitted[];
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
+      setCashSubmitted(rows);
     } catch (e: any) {
       setErr(e?.message || String(e));
     }
@@ -673,8 +754,75 @@ function downloadCsvForRangeClient() {
   }
 
   // Edit/Delete helpers
+  const [editingCashSubmitted, setEditingCashSubmitted] = useState<CashSubmitted | null>(null);
   const [editingCashIn, setEditingCashIn] = useState<CashIn | null>(null);
   const [editingDeposit, setEditingDeposit] = useState<Deposit | null>(null);
+
+  async function onEditCashSubmittedSave() {
+    if (!storeId || !editingCashSubmitted?.id) return;
+    try {
+      setErr(null);
+      const user = me();
+      await updateDoc(
+        doc(db, "stores", String(storeId), "cashSubmitted", editingCashSubmitted.id),
+        {
+          date: Timestamp.fromDate(
+            new Date(`${isoDate(editingCashSubmitted.date) || csDate}T00:00:00`)
+          ),
+          amount: Number(editingCashSubmitted.amount || 0),
+          source: editingCashSubmitted.source || "",
+          note: editingCashSubmitted.note || "",
+          month,
+          updatedAt: Timestamp.now(),
+          updatedByUid: user.uid,
+          updatedByName: user.name,
+          updatedByEmail: user.email,
+        } as any
+      );
+      setEditingCashSubmitted(null);
+
+      const qy = query(
+        collection(db, "stores", String(storeId), "cashSubmitted"),
+        where("month", "==", month)
+      );
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as CashSubmitted[];
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
+      setCashSubmitted(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }
+
+  async function onDeleteCashSubmitted(id?: string) {
+    if (!storeId || !id) return;
+    if (!confirm("Delete this submitted cash?")) return;
+    try {
+      setErr(null);
+      const user = me();
+      await updateDoc(
+        doc(db, "stores", String(storeId), "cashSubmitted", id),
+        {
+          deleted: true,
+          deletedAt: Timestamp.now(),
+          deletedByUid: user.uid,
+          deletedByName: user.name,
+          deletedByEmail: user.email,
+        } as any
+      );
+
+      const qy = query(
+        collection(db, "stores", String(storeId), "cashSubmitted"),
+        where("month", "==", month)
+      );
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as CashSubmitted[];
+      rows.sort((a: any, b: any) => getTime(a.date) - getTime(b.date));
+      setCashSubmitted(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }
 
   async function onEditCashInSave() {
     if (!storeId || !editingCashIn?.id) return;
@@ -682,7 +830,9 @@ function downloadCsvForRangeClient() {
       setErr(null);
       const user = me();
       await updateDoc(doc(db, "stores", storeId, "cashins", editingCashIn.id), {
-        date: Timestamp.fromDate(new Date(`${isoDate(editingCashIn.date) || ciDate}T00:00:00`)),
+        date: Timestamp.fromDate(
+          new Date(`${isoDate(editingCashIn.date) || ciDate}T00:00:00`)
+        ),
         amount: Number(editingCashIn.amount || 0),
         source: editingCashIn.source || "",
         note: editingCashIn.note || "",
@@ -734,7 +884,9 @@ function downloadCsvForRangeClient() {
       setErr(null);
       const user = me();
       await updateDoc(doc(db, "stores", storeId, "deposits", editingDeposit.id), {
-        date: Timestamp.fromDate(new Date(`${isoDate(editingDeposit.date) || depDate}T00:00:00`)),
+        date: Timestamp.fromDate(
+          new Date(`${isoDate(editingDeposit.date) || depDate}T00:00:00`)
+        ),
         amount: Number(editingDeposit.amount || 0),
         method: editingDeposit.method || "",
         note: editingDeposit.note || "",
@@ -782,9 +934,6 @@ function downloadCsvForRangeClient() {
 
   if (!storeId) return <main className="p-6">No store selected.</main>;
 
-  // Compute opening for month m:
-  // 1) explicit override in /openingBalances/{m}, else
-  // 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev, not deleted)
   async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
     const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
     if (openSnap.exists()) {
@@ -837,115 +986,112 @@ function downloadCsvForRangeClient() {
         <StatCard label="Deposits (tracker)" value={depositsSum} />
       </div>
 
-{/* Filters / Export controls */}
-<section className="rounded-lg border bg-white p-4">
-  {/* Month export (existing) */}
-  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
-    <div>
-      <label className="block text-sm mb-1">Month</label>
-      <MonthPicker value={month} onChange={setMonth} />
-    </div>
+      {/* Filters / Export controls */}
+      <section className="rounded-lg border bg-white p-4">
+        {/* Month export */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
+          <div>
+            <label className="block text-sm mb-1">Month</label>
+            <MonthPicker value={month} onChange={setMonth} />
+          </div>
 
-    <div>
-      <label className="block text-sm mb-1">Journal # (optional)</label>
-      <input
-        type="text"
-        value={journalNo}
-        onChange={(e) => setJournalNo(e.target.value)}
-        className="border px-3 py-2 rounded w-full"
-        placeholder="e.g., PC-20251012"
-      />
-    </div>
+          <div>
+            <label className="block text-sm mb-1">Journal # (optional)</label>
+            <input
+              type="text"
+              value={journalNo}
+              onChange={(e) => setJournalNo(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              placeholder="e.g., PC-20251012"
+            />
+          </div>
 
-    <div>
-      <label className="block text-sm mb-1">Cash-in credit account</label>
-      <input
-        type="text"
-        value={cashInCreditAccount}
-        onChange={(e) => setCashInCreditAccount(e.target.value)}
-        className="border px-3 py-2 rounded w-full"
-        disabled={!includeCashIns}
-        placeholder="1000 Bank"
-      />
-    </div>
+          <div>
+            <label className="block text-sm mb-1">Cash-in credit account</label>
+            <input
+              type="text"
+              value={cashInCreditAccount}
+              onChange={(e) => setCashInCreditAccount(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              disabled={!includeCashIns}
+              placeholder="1000 Bank"
+            />
+          </div>
 
-    <div className="flex gap-2 md:justify-end">
-      <button
-        type="button"
-        className="border px-3 py-2 rounded"
-        onClick={previewCsvForMonthClient}
-        title="Open a JSON preview with sample lines and balance totals"
-      >
-        Preview CSV
-      </button>
-      <button
-        type="button"
-        className="border px-3 py-2 rounded"
-        onClick={downloadCsvForMonthClient}
-        title="Download the actual CSV"
-      >
-        Download CSV for {month}
-      </button>
-    </div>
-  </div>
+          <div className="flex gap-2 md:justify-end">
+            <button
+              type="button"
+              className="border px-3 py-2 rounded"
+              onClick={previewCsvForMonthClient}
+              title="Open a JSON preview with sample lines and balance totals"
+            >
+              Preview CSV
+            </button>
+            <button
+              type="button"
+              className="border px-3 py-2 rounded"
+              onClick={downloadCsvForMonthClient}
+              title="Download the actual CSV"
+            >
+              Download CSV for {month}
+            </button>
+          </div>
+        </div>
 
-  {/* Divider */}
-  <hr className="my-4" />
+        <hr className="my-4" />
 
-  {/* Custom date range export (new) */}
-  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
-    <div>
-      <label className="block text-sm mb-1">From (YYYY-MM-DD)</label>
-      <input
-        type="date"
-        value={rangeFrom}
-        onChange={(e) => setRangeFrom(e.target.value)}
-        className="border px-3 py-2 rounded w-full"
-      />
-    </div>
-    <div>
-      <label className="block text-sm mb-1">To (YYYY-MM-DD)</label>
-      <input
-        type="date"
-        value={rangeTo}
-        onChange={(e) => setRangeTo(e.target.value)}
-        className="border px-3 py-2 rounded w-full"
-      />
-    </div>
+        {/* Custom date range export */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 items-end">
+          <div>
+            <label className="block text-sm mb-1">From (YYYY-MM-DD)</label>
+            <input
+              type="date"
+              value={rangeFrom}
+              onChange={(e) => setRangeFrom(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">To (YYYY-MM-DD)</label>
+            <input
+              type="date"
+              value={rangeTo}
+              onChange={(e) => setRangeTo(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+            />
+          </div>
 
-    {/* Re-use the same cash-in toggle that affects both month and range exports */}
-    <div className="flex items-center gap-2">
-      <label className="inline-flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={includeCashIns}
-          onChange={(e) => setIncludeCashIns(e.target.checked)}
-        />
-        Include cash-ins in QBO export
-      </label>
-    </div>
+          <div className="flex items-center gap-2">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={includeCashIns}
+                onChange={(e) => setIncludeCashIns(e.target.checked)}
+              />
+              Include cash-ins in QBO export
+            </label>
+          </div>
 
-    <div className="flex gap-2 md:justify-end">
-      <button
-        type="button"
-        className="border px-3 py-2 rounded"
-        onClick={previewCsvForRangeClient}
-        title="Open a JSON preview for this date range"
-      >
-        Preview CSV (range)
-      </button>
-      <button
-        type="button"
-        className="border px-3 py-2 rounded"
-        onClick={downloadCsvForRangeClient}
-        title="Download CSV for this date range"
-      >
-        Download CSV (range)
-      </button>
-    </div>
-  </div>
-</section>
-
+          <div className="flex gap-2 md:justify-end">
+            <button
+              type="button"
+              className="border px-3 py-2 rounded"
+              onClick={previewCsvForRangeClient}
+              title="Open a JSON preview for this date range"
+            >
+              Preview CSV (range)
+            </button>
+            <button
+              type="button"
+              className="border px-3 py-2 rounded"
+              onClick={downloadCsvForRangeClient}
+              title="Download CSV for this date range"
+            >
+              Download CSV (range)
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* Opening balance override */}
       <section className="rounded-lg border bg-white p-4">
@@ -980,7 +1126,6 @@ function downloadCsvForRangeClient() {
           </div>
         </form>
 
-        {/* Meta */}
         <div className="mt-2 text-xs text-gray-600">
           {!openLoaded ? (
             <span>Loading…</span>
@@ -1007,10 +1152,201 @@ function downloadCsvForRangeClient() {
         </div>
       )}
 
+      {/* Cash Submitted (tracker only) */}
+      <section className="rounded-lg border bg-white p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Cash Submitted</h2>
+        </div>
+
+        <form onSubmit={saveCashSubmitted} className="grid grid-cols-4 gap-3 max-w-4xl">
+          <div>
+            <label className="block text-sm mb-1">Date</label>
+            <input
+              type="date"
+              value={csDate}
+              onChange={(e) => setCsDate(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Amount</label>
+            <input
+              type="number"
+              step="0.01"
+              value={csAmount}
+              onChange={(e) => setCsAmount(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Source</label>
+            <input
+              type="text"
+              value={csSource}
+              onChange={(e) => setCsSource(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+              placeholder="Safe drop / Bank / etc."
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Note</label>
+            <input
+              type="text"
+              value={csNote}
+              onChange={(e) => setCsNote(e.target.value)}
+              className="border px-3 py-2 rounded w-full"
+            />
+          </div>
+          <div className="col-span-4">
+            <button className="border px-4 py-2 rounded">Submit cash</button>
+          </div>
+        </form>
+
+        <div className="mt-4 overflow-x-auto">
+          <div className="mb-2 flex items-center gap-4 text-sm">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showDeletedCashSubmitted}
+                onChange={(e) => setShowDeletedCashSubmitted(e.target.checked)}
+              />
+              Show deleted
+            </label>
+          </div>
+
+          <table className="min-w-[720px] text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-4">Date</th>
+                <th className="py-2 pr-4">Amount</th>
+                <th className="py-2 pr-4">Source</th>
+                <th className="py-2 pr-4">Note</th>
+                <th className="py-2 pr-4">By</th>
+                <th className="py-2 pr-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cashSubmitted
+                .filter((r) => showDeletedCashSubmitted || !r.deleted)
+                .map((r) => {
+                  const edited = !!r.updatedAt && !r.deleted;
+                  const rowClass = r.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
+                  const creator =
+                    r.createdByName || r.createdByEmail || (r.createdByUid ? `uid:${r.createdByUid}` : "");
+                  const editor =
+                    r.updatedByName || r.updatedByEmail || (r.updatedByUid ? `uid:${r.updatedByUid}` : "");
+
+                  if (editingCashSubmitted?.id === r.id) {
+                    return (
+                      <tr key={r.id} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4">
+                          <input
+                            type="date"
+                            className="border px-2 py-1 rounded"
+                            defaultValue={isoDate(r.date)}
+                            onChange={(e) =>
+                              setEditingCashSubmitted((prev) =>
+                                prev ? { ...prev, date: toTs(e.target.value) } : prev
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            type="number"
+                            step="0.01"
+                            defaultValue={String(r.amount)}
+                            onChange={(e) =>
+                              setEditingCashSubmitted((prev) =>
+                                prev ? { ...(prev as CashSubmitted), amount: Number(e.target.value || 0) } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded w-28"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={r.source || ""}
+                            onChange={(e) =>
+                              setEditingCashSubmitted((prev) =>
+                                prev ? { ...(prev as CashSubmitted), source: e.target.value } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <input
+                            defaultValue={r.note || ""}
+                            onChange={(e) =>
+                              setEditingCashSubmitted((prev) =>
+                                prev ? { ...(prev as CashSubmitted), note: e.target.value } : prev
+                              )
+                            }
+                            className="border px-2 py-1 rounded"
+                          />
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
+                            edit…
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4 space-x-2">
+                          <button className="underline" onClick={onEditCashSubmittedSave}>
+                            Save
+                          </button>
+                          <button className="underline" onClick={() => setEditingCashSubmitted(null)}>
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr key={r.id} className={`border-b last:border-b-0 ${rowClass}`}>
+                      <td className="py-2 pr-4">{fmtDate(r.date)}</td>
+                      <td className="py-2 pr-4">{Number(r.amount || 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4">{r.source ?? ""}</td>
+                      <td className="py-2 pr-4">{r.note ?? ""}</td>
+                      <td className="py-2 pr-4 text-xs">
+                        <span
+                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
+                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+                        >
+                          {creator || "—"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 space-x-3">
+                        {!r.deleted && (
+                          <>
+                            <button className="underline" onClick={() => setEditingCashSubmitted(r)}>
+                              Edit
+                            </button>
+                            <button
+                              className="underline text-red-700"
+                              onClick={() => onDeleteCashSubmitted(r.id)}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                        {r.deleted && <span className="text-xs">deleted</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Cash in */}
       <section className="rounded-lg border bg-white p-4">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">Cash in (refill)</h2>
+          <h2 className="text-lg font-semibold">Cash in (Petty Cash Refill)</h2>
           <label className="inline-flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -1254,7 +1590,6 @@ function downloadCsvForRangeClient() {
           </div>
         </form>
 
-        {/* List deposits */}
         <div className="mt-4 overflow-x-auto">
           <div className="mb-2 flex items-center gap-4 text-sm">
             <label className="inline-flex items-center gap-2">
@@ -1393,10 +1728,14 @@ function downloadCsvForRangeClient() {
         </div>
       </section>
 
-      {/* Audit & denominations (collapsible) */}
+            {/* Closing Balance Audit (between cash-in and deposits) */}
+      <ClosingBalanceAuditSection storeId={String(storeId)} month={month} />
+
+
+      {/* Cash calculator + saved counts */}
       <section className="rounded-lg border bg-white p-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Petty cash audit &amp; denominations</h2>
+          <h2 className="text-lg font-semibold">Cash Calculator</h2>
           <button
             type="button"
             className="text-sm underline"
@@ -1423,23 +1762,53 @@ function downloadCsvForRangeClient() {
 
               <div>
                 <label className="block text-xs mb-1">$5 count</label>
-                <input type="number" min="0" value={n5}  onChange={(e) => setN5(e.target.value)}  className="border px-3 py-2 rounded w-full" />
+                <input
+                  type="number"
+                  min="0"
+                  value={n5}
+                  onChange={(e) => setN5(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                />
               </div>
               <div>
                 <label className="block text-xs mb-1">$10 count</label>
-                <input type="number" min="0" value={n10} onChange={(e) => setN10(e.target.value)} className="border px-3 py-2 rounded w-full" />
+                <input
+                  type="number"
+                  min="0"
+                  value={n10}
+                  onChange={(e) => setN10(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                />
               </div>
               <div>
                 <label className="block text-xs mb-1">$20 count</label>
-                <input type="number" min="0" value={n20} onChange={(e) => setN20(e.target.value)} className="border px-3 py-2 rounded w-full" />
+                <input
+                  type="number"
+                  min="0"
+                  value={n20}
+                  onChange={(e) => setN20(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                />
               </div>
               <div>
                 <label className="block text-xs mb-1">$50 count</label>
-                <input type="number" min="0" value={n50} onChange={(e) => setN50(e.target.value)} className="border px-3 py-2 rounded w-full" />
+                <input
+                  type="number"
+                  min="0"
+                  value={n50}
+                  onChange={(e) => setN50(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                />
               </div>
               <div>
                 <label className="block text-xs mb-1">$100 count</label>
-                <input type="number" min="0" value={n100} onChange={(e) => setN100(e.target.value)} className="border px-3 py-2 rounded w-full" />
+                <input
+                  type="number"
+                  min="0"
+                  value={n100}
+                  onChange={(e) => setN100(e.target.value)}
+                  className="border px-3 py-2 rounded w-full"
+                />
               </div>
 
               <div className="col-span-2">
@@ -1458,25 +1827,26 @@ function downloadCsvForRangeClient() {
                 <div>
                   Counted total: <strong>${counted.toFixed(2)}</strong>
                 </div>
-                <div className={variance === 0 ? "" : variance > 0 ? "text-green-700" : "text-red-700"}>
-                  Variance vs projected closing:{" "}
-                  <strong>{variance >= 0 ? "+" : ""}${variance.toFixed(2)}</strong>
-                </div>
               </div>
 
               <div className="col-span-2">
-                <button className="border px-4 py-2 rounded">Save audit</button>
+                <button className="border px-4 py-2 rounded">Save count</button>
               </div>
             </form>
 
-            {/* Recent audits */}
+            {/* Recent denomination snapshots */}
             <div className="mt-4 overflow-x-auto">
-              <table className="min-w-[560px] text-sm">
+              <table className="min-w-[720px] text-sm">
                 <thead>
                   <tr className="text-left border-b">
                     <th className="py-2 pr-4">Date</th>
-                    <th className="py-2 pr-4">Counted total</th>
-                    <th className="py-2 pr-4">Variance (vs closing at time)</th>
+                    <th className="py-2 pr-4">$5</th>
+                    <th className="py-2 pr-4">$10</th>
+                    <th className="py-2 pr-4">$20</th>
+                    <th className="py-2 pr-4">$50</th>
+                    <th className="py-2 pr-4">$100</th>
+                    <th className="py-2 pr-4">Change</th>
+                    <th className="py-2 pr-4">Total</th>
                     <th className="py-2 pr-4">Actions</th>
                   </tr>
                 </thead>
@@ -1486,12 +1856,16 @@ function downloadCsvForRangeClient() {
                     .slice(-5)
                     .map((a) => {
                       const dt = a.date?.toDate?.() ?? new Date();
-                      const v = (Number(a.total || 0) - closing).toFixed(2);
                       return (
                         <tr key={a.id} className="border-b last:border-b-0">
                           <td className="py-2 pr-4">{dt.toLocaleDateString("en-CA")}</td>
+                          <td className="py-2 pr-4">{Number(a.n5 || 0)}</td>
+                          <td className="py-2 pr-4">{Number(a.n10 || 0)}</td>
+                          <td className="py-2 pr-4">{Number(a.n20 || 0)}</td>
+                          <td className="py-2 pr-4">{Number(a.n50 || 0)}</td>
+                          <td className="py-2 pr-4">{Number(a.n100 || 0)}</td>
+                          <td className="py-2 pr-4">${Number(a.change || 0).toFixed(2)}</td>
                           <td className="py-2 pr-4">${Number(a.total || 0).toFixed(2)}</td>
-                          <td className="py-2 pr-4">{v}</td>
                           <td className="py-2 pr-4">
                             <button
                               type="button"
