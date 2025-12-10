@@ -47,7 +47,7 @@ const transporter = nodemailer.createTransport({
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { storeId: string } }
+  { params }: any
 ) {
   const { storeId } = params;
 
