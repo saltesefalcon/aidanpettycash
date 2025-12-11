@@ -65,9 +65,19 @@ export async function POST(
   req: NextRequest,
   context: any
 ) {
+  // Loosen the type for Next.js but then validate/narrow ourselves.
   const { storeId } = (context?.params ?? {}) as { storeId?: string };
-  const normalizedStoreId = (storeId || "").toLowerCase();
 
+  if (!storeId) {
+    return NextResponse.json(
+      { ok: false, error: "Missing storeId in route params" },
+      { status: 400 }
+    );
+  }
+
+  // From here on, this is guaranteed to be a string.
+  const storeIdResolved = storeId as string;
+  const normalizedStoreId = storeIdResolved.toLowerCase();
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -84,7 +94,7 @@ export async function POST(
     // Load the entry
     const entrySnap = await db
       .collection("stores")
-      .doc(storeId)
+      .doc(storeIdResolved)
       .collection("entries")
       .doc(entryId)
       .get();
@@ -138,15 +148,18 @@ export async function POST(
         ok: true,
         skipped: true,
         reason: "No email rule for account",
-        storeId,
+        storeId: storeIdResolved,
         accountName,
       });
     }
 
     // Optional: load store name for nicer body (subject will be generic per your spec)
-    const storeSnap = await db.collection("stores").doc(storeId).get();
+    const storeSnap = await db.collection("stores").doc(storeIdResolved).get();
     const storeName =
-      ((storeSnap.data()?.name as string) || storeId || "Petty Cash").toString();
+      ((storeSnap.data()?.name as string) ||
+        storeIdResolved ||
+        "Petty Cash"
+      ).toString();
 
     // Try to get a human-friendly date + description for the body
     const date =
@@ -202,7 +215,7 @@ export async function POST(
       sent: true,
       to,
       accountName,
-      storeId,
+      storeId: storeIdResolved,
       subject,
     });
   } catch (err: any) {
