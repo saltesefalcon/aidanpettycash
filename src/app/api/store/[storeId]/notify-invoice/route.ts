@@ -3,9 +3,25 @@ import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { getAdminDb } from "@/lib/admin";
 
-// TODO: Adjust these store IDs and email addresses to match your real setup.
-// Keys are Firestore storeIds; inner keys are accountName strings exactly as
-// they appear in entries.accountName (e.g. "5110 Purchases:Beer Purchases").
+// Take something like "5130 Purchases:Liquor Purchases"
+// and return just "Liquor Purchases" for the email subject.
+function accountLabelForSubject(raw: string | undefined): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+
+  // Prefer the part after the last ":" (e.g. "Liquor Purchases")
+  const afterColon = trimmed.split(":").slice(-1)[0]?.trim();
+  if (afterColon && afterColon !== trimmed) return afterColon;
+
+  // Fallback: strip a leading account number + word like "Purchases"
+  // e.g. "5130 Purchases Food" -> "Food"
+  const stripped = trimmed.replace(/^\d+\s+\w+\s*/u, "").trim();
+  return stripped || trimmed;
+}
+
+// Map storeId + accountName → target email address.
+// Keys must match the Firestore storeIds (lowercase) and the accountName
+// exactly as stored in entries.accountName (or entries.account).
 const ACCOUNT_EMAIL_RULES: Record<string, Record<string, string>> = {
   beacon: {
     "5110 Purchases:Beer Purchases": "accounts@beaconsocialhouse.com",
@@ -47,9 +63,10 @@ const transporter = nodemailer.createTransport({
 
 export async function POST(
   req: NextRequest,
-  { params }: any
+  context: { params: { storeId: string } }
 ) {
-  const { storeId } = params;
+  const { storeId } = context.params;
+  const normalizedStoreId = (storeId || "").toLowerCase();
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -79,9 +96,12 @@ export async function POST(
     }
 
     const entry = entrySnap.data() as any;
-    const accountName: string =
-      (entry.accountName || entry.account || "").toString().trim();
-    const invoiceUrl: string = (entry.invoiceUrl || "").toString().trim();
+    const accountName: string = (entry.accountName || entry.account || "")
+      .toString()
+      .trim();
+    const invoiceUrl: string = (entry.invoiceUrl || "")
+      .toString()
+      .trim();
 
     if (!accountName || !invoiceUrl) {
       // Nothing to do if no account or no invoice attached
@@ -93,8 +113,23 @@ export async function POST(
     }
 
     // Resolve store config + email target
-    const storeRules = ACCOUNT_EMAIL_RULES[storeId] || {};
-    const to = storeRules[accountName];
+    const storeRules = ACCOUNT_EMAIL_RULES[normalizedStoreId] || {};
+
+    // Try exact match first
+    let to = storeRules[accountName];
+
+    // Fuzzy match: ignore case/extra spaces
+    if (!to) {
+      const normalize = (s: string) =>
+        s.replace(/\s+/g, " ").trim().toLowerCase();
+      const target = normalize(accountName);
+      for (const [key, email] of Object.entries(storeRules)) {
+        if (normalize(key) === target) {
+          to = email;
+          break;
+        }
+      }
+    }
 
     if (!to) {
       // This account is not configured to auto-email; silently skip
@@ -102,16 +137,17 @@ export async function POST(
         ok: true,
         skipped: true,
         reason: "No email rule for account",
+        storeId,
         accountName,
       });
     }
 
-    // Optional: load store name for nicer subject
+    // Optional: load store name for nicer body (subject will be generic per your spec)
     const storeSnap = await db.collection("stores").doc(storeId).get();
     const storeName =
-      (storeSnap.data()?.name as string) || storeId || "Petty Cash";
+      ((storeSnap.data()?.name as string) || storeId || "Petty Cash").toString();
 
-    // Try to get a human-friendly date + description for the subject/body
+    // Try to get a human-friendly date + description for the body
     const date =
       typeof entry.date?.toDate === "function"
         ? entry.date.toDate()
@@ -123,7 +159,13 @@ export async function POST(
     const description = (entry.description || "").toString();
     const amount = Number(entry.amount || 0).toFixed(2);
 
-    const subject = `[${storeName}] Petty Cash Invoice – ${accountName} – ${dateStr}`;
+    // Build subject exactly as requested:
+    // "New Notch Petty Cash Invoice 2025-12-11 Liquor Purchases"
+    const shortAccount = accountLabelForSubject(accountName);
+    const subject = `New Notch Petty Cash Invoice ${dateStr || ""} ${
+      shortAccount || ""
+    }`.trim();
+
     const plainBody = [
       `Store: ${storeName}`,
       `Account: ${accountName}`,
@@ -146,8 +188,9 @@ export async function POST(
       // Nodemailer can fetch from a URL directly; we don't have to read the bytes.
       attachments: [
         {
-          filename:
-            `${storeName.replace(/\s+/g, "_")}_${dateStr || "invoice"}.pdf`,
+          filename: `${
+            storeName.replace(/\s+/g, "_") || "pettycash"
+          }_${dateStr || "invoice"}.pdf`,
           path: invoiceUrl,
         },
       ],
@@ -158,6 +201,8 @@ export async function POST(
       sent: true,
       to,
       accountName,
+      storeId,
+      subject,
     });
   } catch (err: any) {
     console.error("[notify-invoice] error", err);

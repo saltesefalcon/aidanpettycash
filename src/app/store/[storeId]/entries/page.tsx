@@ -29,6 +29,34 @@ export default function EntriesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  async function triggerInvoiceEmail(storeId: string, entryId: string) {
+    try {
+      const res = await fetch(`/api/store/${storeId}/notify-invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryId }),
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        // response might not be JSON; that's fine
+      }
+
+      console.log("[triggerInvoiceEmail]", {
+        storeId,
+        entryId,
+        status: res.status,
+        data,
+      });
+    } catch (err) {
+      // Don't block the UI if email fails; just log it.
+      console.error("Failed to trigger invoice email:", err);
+    }
+  }
+
+
   // ===== Scanner state =====
   // invoiceUrlRaw: canonical Storage URL we save into Firestore
   // invoiceUrl:    cache-busted URL used in the form area
@@ -381,6 +409,10 @@ const params = new URLSearchParams({
           invoiceContentType: "application/pdf",
           updatedAt: serverTimestamp(),
         });
+
+        // Trigger auto-email for this updated invoice (if the account is configured)
+        triggerInvoiceEmail(String(storeId), d.entryId);
+
         await loadJournal(monthSel);
         setPreviewUrl(viewUrl);
         setShowInvoice(true);
@@ -455,7 +487,9 @@ const params = new URLSearchParams({
         invoiceContentType: "application/pdf",
       });
 
-      
+           // Trigger auto-email in the background (backend decides if it should send)
+      triggerInvoiceEmail(String(storeId), newRef.id);
+ 
       // Reset form fields so the next entry starts clean
       setDateStr(todayStr);
       setVendor("");
