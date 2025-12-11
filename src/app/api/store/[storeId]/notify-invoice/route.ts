@@ -63,10 +63,11 @@ const transporter = nodemailer.createTransport({
 
 export async function POST(
   req: NextRequest,
-  context: { params: { storeId: string } }
+  context: any
 ) {
-  const { storeId } = context.params;
+  const { storeId } = (context?.params ?? {}) as { storeId?: string };
   const normalizedStoreId = (storeId || "").toLowerCase();
+
 
   try {
     const body = await req.json().catch(() => ({}));
