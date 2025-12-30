@@ -531,37 +531,48 @@ const params = new URLSearchParams({
 async function saveEdit() {
   if (!editingId || !edit) return;
 
-  // one set of numbers only
-  const amount = parseFloat(edit.amountStr || "0") || 0;
-  const hst    = parseFloat(edit.hstStr   || "0") || 0;
+  try {
+    // Parse numbers once
+    const amount = parseFloat(edit.amountStr || "0") || 0;
+    const hst    = parseFloat(edit.hstStr   || "0") || 0;
 
-  const payload = {
-    date: edit.dateStr,
-    vendor: edit.vendor.trim(),
-    description: edit.description.trim(),
-    amount: round2(amount),
-    hst: round2(hst),
-    net: round2(Math.max(amount - hst, 0)),
-    // save the label if we have it, else the id
-    account: accountsMap.get(edit.accountId) || edit.accountId,
-    accountName: accountsMap.get(edit.accountId) || "",
-    dept: edit.dept,
-  };
+    // Normalize date + month (same pattern as handleSubmit)
+    const date    = new Date(`${edit.dateStr}T00:00:00`);
+    const dateTs  = Timestamp.fromDate(date);
+    const month   = monthString(date);
 
-  const res = await fetch(`/api/store/${storeId}/entries/${editingId}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    // Resolve account label
+    const accountLabel = accountsMap.get(edit.accountId) || edit.accountId;
 
-  if (!res.ok) {
-    alert(`Update failed (${res.status}): ${await res.text()}`);
-    return;
+    // Current user for audit fields
+    const u = auth.currentUser;
+
+    const ref = doc(db, "stores", String(storeId), "entries", editingId);
+
+    await updateDoc(ref, {
+      date: dateTs,
+      month,
+      vendor:       edit.vendor.trim(),
+      description:  edit.description.trim(),
+      amount:       round2(amount),
+      hst:          round2(hst),
+      net:          round2(Math.max(amount - hst, 0)),
+      account:      accountLabel,
+      accountName:  accountLabel,
+      dept:         edit.dept,
+      updatedAt:    serverTimestamp(),
+      updatedByUid:   u?.uid || null,
+      updatedByEmail: u?.email || null,
+      updatedByName:  u?.displayName || u?.email || null,
+    } as any);
+
+    setEditingId(null);
+    setEdit(null);
+    await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
+  } catch (e: any) {
+    console.error("Edit failed", e);
+    alert(`Update failed: ${e?.message || String(e)}`);
   }
-
-  setEditingId(null);
-  setEdit(null);
-  await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
 }
 
 
