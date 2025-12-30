@@ -177,29 +177,38 @@ entries = entries.map((e: any) => {
     if (audit) {
       const used = new Set<string>();
       const invalid: any[] = [];
+
       for (const e of entries) {
         const acct = String(e.account || "").trim();
         if (acct) used.add(acct);
+
         const badName = !acct || !MERGED_ALLOWED.has(acct);
         const pettyOnExpenseLine = acct === pettyCashAccount;
+
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
-            date: e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
+            date:
+              e.date?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? null,
             vendor: e.vendor ?? null,
             amount: e.amount ?? null,
             account: acct || null,
             reason: pettyOnExpenseLine
-            ? `Expense line cannot use petty-cash account (${pettyCashAccount})`
-            : "Account not in allowed list (resolve account IDs to names)",
+              ? `Expense line cannot use ${pettyCashAccount}`
+              : "Account not in allowed list (resolve account IDs to names)",
           });
         }
       }
+
       return NextResponse.json({
         ok: true,
         stage: "audit",
         range: { from, to },
-        counts: { entries: entries.length, uniqueAccounts: used.size, invalid: invalid.length },
+        counts: {
+          entries: entries.length,
+          uniqueAccounts: used.size,
+          invalid: invalid.length,
+        },
         uniqueAccountsUsed: Array.from(used).sort(),
         invalid,
       });
@@ -207,28 +216,32 @@ entries = entries.map((e: any) => {
 
     // DEBUG preview
     if (debug && preview) {
-const csv0 = buildQboCsv({
-  entries,
-  cashins,
-  includeCashIns,
-  cashInCreditAccount,
-  storeId,
-  journalNo,
-  journalDate: to!,
-  allowedAccounts: Array.from(MERGED_ALLOWED),
-});
+      const csv0 = buildQboCsv({
+        entries,
+        cashins,
+        includeCashIns,
+        cashInCreditAccount,
+        storeId,
+        journalNo,
+        journalDate: to!,
+        allowedAccounts: Array.from(MERGED_ALLOWED),
+        pettyCashAccount, // 👈 use the per-store petty cash GL
+      });
 
       const csv = ascii ? toAscii(csv0) : csv0;
       const lines = csv.split(/\r?\n/).filter(Boolean);
-      const cols = (line: string) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
-      let deb = 0,
-        cred = 0;
+      const cols = (line: string) =>
+        line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/g);
+
+      let deb = 0;
+      let cred = 0;
       for (const line of lines) {
         if (line.startsWith("*JournalNo")) continue;
         const c = cols(line);
         deb += Number(c[3] || 0);
         cred += Number(c[4] || 0);
       }
+
       return NextResponse.json({
         ok: true,
         stage: "csv.preview",
@@ -242,16 +255,17 @@ const csv0 = buildQboCsv({
     }
 
     // REAL CSV
-const csv0 = buildQboCsv({
-  entries,
-  cashins,
-  includeCashIns,
-  cashInCreditAccount,
-  storeId,
-  journalNo,
-  journalDate: to!,
-  allowedAccounts: Array.from(MERGED_ALLOWED),
-});
+    const csv0 = buildQboCsv({
+      entries,
+      cashins,
+      includeCashIns,
+      cashInCreditAccount,
+      storeId,
+      journalNo,
+      journalDate: to!,
+      allowedAccounts: Array.from(MERGED_ALLOWED),
+      pettyCashAccount, // 👈 and here
+    });
 
     const csv = ascii ? toAscii(csv0) : csv0;
 
@@ -262,6 +276,7 @@ const csv0 = buildQboCsv({
         "Content-Disposition": `attachment; filename="pettycash_${storeId}_${from}_to_${to}.csv"`,
       },
     });
+
   } catch (err: any) {
     const msg = `[qbo-export] ${err?.name || "Error"}: ${err?.message || String(err)}\n${err?.stack || ""}`;
     console.error(msg);
