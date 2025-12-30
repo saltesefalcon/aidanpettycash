@@ -181,7 +181,7 @@ entries = entries.map((e: any) => {
         const acct = String(e.account || "").trim();
         if (acct) used.add(acct);
         const badName = !acct || !MERGED_ALLOWED.has(acct);
-        const pettyOnExpenseLine = acct === "1050 Petty Cash";
+        const pettyOnExpenseLine = acct === pettyCashAccount;
         if (badName || pettyOnExpenseLine) {
           invalid.push({
             id: e.id,
@@ -190,8 +190,8 @@ entries = entries.map((e: any) => {
             amount: e.amount ?? null,
             account: acct || null,
             reason: pettyOnExpenseLine
-              ? "Expense line cannot use 1050 Petty Cash"
-              : "Account not in allowed list (resolve account IDs to names)",
+            ? `Expense line cannot use petty-cash account (${pettyCashAccount})`
+            : "Account not in allowed list (resolve account IDs to names)",
           });
         }
       }
