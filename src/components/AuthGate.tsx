@@ -5,7 +5,7 @@ import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 
-const IDLE_MS = 10 * 60 * 1000; // 10 minutes
+const IDLE_MS = 45 * 60 * 1000; // 10 minutes
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const r = useRouter();

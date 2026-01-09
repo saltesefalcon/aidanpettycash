@@ -5,7 +5,7 @@ import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 
-const IDLE_MS  = 10 * 60 * 1000; // 10 minutes
+const IDLE_MS  = 45 * 60 * 1000; // 10 minutes
 const CHECK_MS = 15 * 1000;      // poll every 15s
 
 const KEY_LAST         = 'pc_last_activity';
