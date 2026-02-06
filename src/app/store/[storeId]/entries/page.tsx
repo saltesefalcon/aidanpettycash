@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import {
-  setDoc, collection, doc, getDoc, getDocs, orderBy, query,
-  serverTimestamp, onSnapshot, Timestamp, where, deleteDoc, updateDoc
+  setDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  serverTimestamp,
+  onSnapshot,
+  Timestamp,
+  where,
+  updateDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { round2, HST_RATE } from "@/lib/money";
 import MonthPicker from "@/components/MonthPicker";
-import Link from "next/link";
 import MobileNav from "@/components/MobileNav";
 
 type Account = { id: string; name?: string };
@@ -18,11 +27,27 @@ type EditState = {
   dateStr: string;
   vendor: string;
   description: string;
+  receivedBy: string;
   amountStr: string;
   hstStr: string;
   accountId: string;
   dept: "FOH" | "BOH" | "TRAVEL" | "OTHER" | "BANK";
 };
+
+// Safer than inline <colgroup> with whitespace (prevents hydration warnings)
+const JOURNAL_COL_WIDTHS = [
+  "w-[110px]", // Date
+  "w-[180px]", // Vendor
+  "w-[240px]", // Description
+  "w-[160px]", // Received By
+  "w-[220px]", // Account
+  "w-[90px]", // Dept
+  "w-[90px]", // Invoice
+  "w-[110px]", // Net
+  "w-[110px]", // HST
+  "w-[120px]", // Total
+  "w-[140px]", // Actions
+] as const;
 
 export default function EntriesPage() {
   const { storeId } = useParams() as { storeId: string };
@@ -56,22 +81,21 @@ export default function EntriesPage() {
     }
   }
 
-
   // ===== Scanner state =====
   // invoiceUrlRaw: canonical Storage URL we save into Firestore
   // invoiceUrl:    cache-busted URL used in the form area
   // previewUrl:    used ONLY by the modal viewer (journal "View")
   const [invoiceUrlRaw, setInvoiceUrlRaw] = useState<string | null>(null);
-  const [invoiceUrl,    setInvoiceUrl]    = useState<string | null>(null);
-  const [previewUrl,    setPreviewUrl]    = useState<string | null>(null);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // who/what we’re scanning for
-  const [draftEntryId,  setDraftEntryId]  = useState<string | null>(null);
-  const [showInvoice,   setShowInvoice]   = useState(false);
+  const [draftEntryId, setDraftEntryId] = useState<string | null>(null);
+  const [showInvoice, setShowInvoice] = useState(false);
 
   // scanner-session bookkeeping
-  const [scanNonce,     setScanNonce]     = useState<string>("");
-  const [scanMode,      setScanMode]      = useState<"new" | "edit" | null>(null);
+  const [scanNonce, setScanNonce] = useState<string>("");
+  const [scanMode, setScanMode] = useState<"new" | "edit" | null>(null);
   const [scanningForId, setScanningForId] = useState<string | null>(null);
 
   function resetScanState() {
@@ -82,19 +106,38 @@ export default function EntriesPage() {
     setScanNonce("");
     setScanMode(null);
     setScanningForId(null);
-    try { localStorage.removeItem("pettycash:lastScan"); } catch {}
+    try {
+      localStorage.removeItem("pettycash:lastScan");
+    } catch {}
   }
   // Clear only the latches (do NOT clear invoice url/draft id)
   function clearScanLatchOnly() {
     setScanNonce("");
     setScanMode(null);
     setScanningForId(null);
-    try { localStorage.removeItem("pettycash:lastScan"); } catch {}
+    try {
+      localStorage.removeItem("pettycash:lastScan");
+    } catch {}
   }
 
   // ===== Auth (for enteredBy) =====
   const [user, setUser] = useState<User | null>(auth.currentUser);
   useEffect(() => onAuthStateChanged(auth, setUser), []);
+
+  const [role, setRole] = useState<"admin" | "manager" | "">("");
+  const isAdmin = role === "admin";
+
+  useEffect(() => {
+    (async () => {
+      if (!user?.uid) {
+        setRole("");
+        return;
+      }
+      const snap = await getDoc(doc(db, "memberships", user.uid));
+      const data = snap.exists() ? (snap.data() as any) : null;
+      setRole((data?.role as any) || "");
+    })();
+  }, [user?.uid]);
 
   // ===== Store name (optional) =====
   const [storeName, setStoreName] = useState<string | null>(null);
@@ -107,7 +150,10 @@ export default function EntriesPage() {
 
   // ===== Accounts (map id -> name) =====
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const accountsMap = useMemo(() => new Map(accounts.map(a => [a.id, a.name || a.id])), [accounts]);
+  const accountsMap = useMemo(
+    () => new Map(accounts.map((a) => [a.id, a.name || a.id])),
+    [accounts]
+  );
   const [accLoading, setAccLoading] = useState(true);
   useEffect(() => {
     (async () => {
@@ -126,7 +172,9 @@ export default function EntriesPage() {
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const urlMonth = searchParams.get("m") || todayStr.slice(0, 7);
   const [monthSel, setMonthSel] = useState<string>(urlMonth);
-  useEffect(() => { if (urlMonth !== monthSel) setMonthSel(urlMonth); }, [urlMonth]);
+  useEffect(() => {
+    if (urlMonth !== monthSel) setMonthSel(urlMonth);
+  }, [urlMonth]);
   function setMonthAndUrl(m: string) {
     setMonthSel(m);
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
@@ -147,33 +195,30 @@ export default function EntriesPage() {
       setSummaryErr(null);
       setOpening(round2(await computeOpeningForMonth(String(storeId), m)));
 
+      // cash-ins for the month (ignore soft-deleted; treat missing flag as not deleted)
+      const cinSnap = await getDocs(
+        query(collection(db, "stores", String(storeId), "cashins"), where("month", "==", m))
+      );
 
-// cash-ins for the month (ignore soft-deleted; treat missing flag as not deleted)
-const cinSnap = await getDocs(
-  query(
-    collection(db, "stores", String(storeId), "cashins"),
-    where("month", "==", m)
-  )
-);
-
-let cin = 0;
-cinSnap.forEach((d) => {
-  const data = d.data() as any;
-  if (data.deleted === true) return; // skip soft-deleted cash-ins
-  cin += Number(data.amount || 0);
-});
-setCashIn(round2(cin));
+      let cin = 0;
+      cinSnap.forEach((d) => {
+        const data = d.data() as any;
+        if (data.deleted === true) return; // skip soft-deleted cash-ins
+        cin += Number(data.amount || 0);
+      });
+      setCashIn(round2(cin));
 
       const outSnap = await getDocs(
         query(collection(db, "stores", String(storeId), "entries"), where("month", "==", m))
       );
-     let out = 0, hstSum = 0;
-outSnap.forEach((d) => {
-  const data = d.data() as any;
-  if (data.deleted === true) return;     // skip soft-deleted entries
-  out += Number(data.amount || 0);
-  hstSum += Number(data.hst || 0);
-});
+      let out = 0,
+        hstSum = 0;
+      outSnap.forEach((d) => {
+        const data = d.data() as any;
+        if (data.deleted === true) return; // skip soft-deleted entries
+        out += Number(data.amount || 0);
+        hstSum += Number(data.hst || 0);
+      });
 
       setCashOut(round2(out));
       setHstTotal(round2(hstSum));
@@ -188,6 +233,11 @@ outSnap.forEach((d) => {
   const [journalErr, setJournalErr] = useState<string | null>(null);
   const [showDeletedEntries, setShowDeletedEntries] = useState(false);
 
+  // Draft text for a note (only while editing)
+  const [flagDrafts, setFlagDrafts] = useState<Record<string, string>>({});
+  // Which entries are currently in "edit note" mode
+  const [flagEditing, setFlagEditing] = useState<Record<string, boolean>>({});
+
   async function loadJournal(m: string) {
     setJLoading(true);
     try {
@@ -199,8 +249,7 @@ outSnap.forEach((d) => {
       );
       const snap = await getDocs(qy);
       const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-setJournal(list);
-
+      setJournal(list);
     } catch (e: any) {
       setJournalErr(
         "Needs composite index: collection ‘entries’, fields month Asc + date Asc. Create in Firestore Console → Indexes → Composite."
@@ -211,16 +260,20 @@ setJournal(list);
     }
   }
 
-  useEffect(() => { loadSummary(monthSel); loadJournal(monthSel); }, [storeId, monthSel]); // eslint-disable-line
+  useEffect(() => {
+    loadSummary(monthSel);
+    loadJournal(monthSel);
+  }, [storeId, monthSel]); // eslint-disable-line
 
   // ===== New-entry form =====
   const [dateStr, setDateStr] = useState(todayStr);
   const [vendor, setVendor] = useState("");
   const [description, setDescription] = useState("");
+  const [receivedBy, setReceivedBy] = useState("");
   const [accountId, setAccountId] = useState("");
   const [amountStr, setAmountStr] = useState("");
   const [hstStr, setHstStr] = useState("");
-  const [dept, setDept] = useState<"FOH"|"BOH"|"TRAVEL"|"OTHER"|"BANK">("FOH");
+  const [dept, setDept] = useState<"FOH" | "BOH" | "TRAVEL" | "OTHER" | "BANK">("FOH");
 
   // Pick first account after load
   useEffect(() => {
@@ -228,8 +281,8 @@ setJournal(list);
   }, [accLoading, accounts, accountId]);
 
   const amountNum = parseFloat(amountStr || "0") || 0;
-  const hstNum    = parseFloat(hstStr || "0") || 0;
-  const netNum    = useMemo(() => round2(Math.max(amountNum - hstNum, 0)), [amountNum, hstNum]);
+  const hstNum = parseFloat(hstStr || "0") || 0;
+  const netNum = useMemo(() => round2(Math.max(amountNum - hstNum, 0)), [amountNum, hstNum]);
 
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -241,107 +294,105 @@ setJournal(list);
     return `${y}-${m}`;
   }
   function fillHst13() {
-    setHstStr(amountNum ? (round2(amountNum * HST_RATE)).toFixed(2) : "");
+    setHstStr(amountNum ? round2(amountNum * HST_RATE).toFixed(2) : "");
   }
 
   // Live cash-ins total (ignores soft-deleted)
-useEffect(() => {
-  if (!storeId) return;
-  const qCashins = query(
-    collection(db, "stores", String(storeId), "cashins"),
-    where("month", "==", monthSel)
-  );
-  const unsub = onSnapshot(qCashins, (snap) => {
-    let total = 0;
-    snap.forEach((d) => {
-      const data = d.data() as any;
-      if (data.deleted === true) return;           // skip soft-deleted
-      total += Number(data.amount || 0);
+  useEffect(() => {
+    if (!storeId) return;
+    const qCashins = query(
+      collection(db, "stores", String(storeId), "cashins"),
+      where("month", "==", monthSel)
+    );
+    const unsub = onSnapshot(qCashins, (snap) => {
+      let total = 0;
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        if (data.deleted === true) return; // skip soft-deleted
+        total += Number(data.amount || 0);
+      });
+      setCashIn(round2(total));
     });
-    setCashIn(round2(total));
-  });
-  return () => unsub();
-}, [storeId, monthSel]);
+    return () => unsub();
+  }, [storeId, monthSel]);
 
-// Live cash-out + HST totals
-useEffect(() => {
-  if (!storeId) return;
-  const qEntries = query(
-    collection(db, "stores", String(storeId), "entries"),
-    where("month", "==", monthSel)
-  );
-  const unsub = onSnapshot(qEntries, (snap) => {
-    let out = 0, hstSum = 0;
-    snap.forEach((d) => {
-  const x = d.data() as any;
-  if (x.deleted === true) return;         // skip soft-deleted entries
-  out += Number(x.amount || 0);
-  hstSum += Number(x.hst || 0);
-});
+  // Live cash-out + HST totals
+  useEffect(() => {
+    if (!storeId) return;
+    const qEntries = query(
+      collection(db, "stores", String(storeId), "entries"),
+      where("month", "==", monthSel)
+    );
+    const unsub = onSnapshot(qEntries, (snap) => {
+      let out = 0,
+        hstSum = 0;
+      snap.forEach((d) => {
+        const x = d.data() as any;
+        if (x.deleted === true) return; // skip soft-deleted entries
+        out += Number(x.amount || 0);
+        hstSum += Number(x.hst || 0);
+      });
 
-    setCashOut(round2(out));
-    setHstTotal(round2(hstSum));
-  });
-  return () => unsub();
-}, [storeId, monthSel]);
+      setCashOut(round2(out));
+      setHstTotal(round2(hstSum));
+    });
+    return () => unsub();
+  }, [storeId, monthSel]);
 
-// Live opening balance (override else computed from previous month)
-useEffect(() => {
-  if (!storeId) return;
-  const ref = doc(db, "stores", String(storeId), "openingBalances", monthSel);
-  const unsub = onSnapshot(ref, async () => {
-  const v = await computeOpeningForMonth(String(storeId), monthSel);
-  setOpening(round2(v));
-});
-  return () => unsub();
-}, [storeId, monthSel]);
+  // Live opening balance (override else computed from previous month)
+  useEffect(() => {
+    if (!storeId) return;
+    const ref = doc(db, "stores", String(storeId), "openingBalances", monthSel);
+    const unsub = onSnapshot(ref, async () => {
+      const v = await computeOpeningForMonth(String(storeId), monthSel);
+      setOpening(round2(v));
+    });
+    return () => unsub();
+  }, [storeId, monthSel]);
 
+  // Compute opening for month m as either:
+  // 1) explicit override in /openingBalances/{m}, else
+  // 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev, not deleted)
+  async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
+    // 1) explicit override?
+    const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
+    if (openSnap.exists()) {
+      return Number((openSnap.data() as any).amount ?? 0);
+    }
 
-// Compute opening for month m as either:
-// 1) explicit override in /openingBalances/{m}, else
-// 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev, not deleted)
-async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
-  // 1) explicit override?
-  const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
-  if (openSnap.exists()) {
-    return Number(((openSnap.data() as any).amount ?? 0));
+    // figure previous month key
+    const [yy, mm] = m.split("-").map(Number);
+    const prev = new Date(yy, mm - 2, 1); // previous month
+    const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+
+    // prev open (0 if never set)
+    const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
+    const prevOpen = prevOpenSnap.exists() ? Number((prevOpenSnap.data() as any).amount ?? 0) : 0;
+
+    // sum cash-ins (skip soft-deleted)
+    const cinSnap = await getDocs(
+      query(collection(db, "stores", storeId, "cashins"), where("month", "==", pm))
+    );
+    let cin = 0;
+    cinSnap.forEach((d) => {
+      const x = d.data() as any;
+      if (x.deleted === true) return;
+      cin += Number(x.amount || 0);
+    });
+
+    // sum entries (cash-out) — SKIP soft-deleted here too
+    const outSnap = await getDocs(
+      query(collection(db, "stores", storeId, "entries"), where("month", "==", pm))
+    );
+    let out = 0;
+    outSnap.forEach((d) => {
+      const x = d.data() as any;
+      if (x.deleted === true) return;
+      out += Number(x.amount || 0);
+    });
+
+    return Number((prevOpen + cin - out).toFixed(2));
   }
-
-  // figure previous month key
-  const [yy, mm] = m.split("-").map(Number);
-  const prev = new Date(yy, (mm - 1) - 1, 1); // previous month
-  const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
-
-  // prev open (0 if never set)
-  const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
-  const prevOpen = prevOpenSnap.exists()
-    ? Number(((prevOpenSnap.data() as any).amount ?? 0))
-    : 0;
-
-  // sum cash-ins (skip soft-deleted)
-  const cinSnap = await getDocs(
-    query(collection(db, "stores", storeId, "cashins"), where("month", "==", pm))
-  );
-  let cin = 0;
-  cinSnap.forEach(d => {
-    const x = d.data() as any;
-    if (x.deleted === true) return;   // <--- important
-    cin += Number(x.amount || 0);
-  });
-
-  // sum entries (cash-out) — SKIP soft-deleted here too
-  const outSnap = await getDocs(
-    query(collection(db, "stores", storeId, "entries"), where("month", "==", pm))
-  );
-  let out = 0;
-  outSnap.forEach(d => {
-    const x = d.data() as any;
-    if (x.deleted === true) return;   // <--- THIS is the new guard
-    out += Number(x.amount || 0);
-  });
-
-  return Number((prevOpen + cin - out).toFixed(2));
-}
 
   // ------- Scanner integration -------
   function openScanner(mode: "new" | "edit", forId?: string) {
@@ -353,10 +404,7 @@ async function computeOpeningForMonth(storeId: string, m: string): Promise<numbe
     }
 
     const entriesCol = collection(db, "stores", String(storeId), "entries");
-    const useId =
-      mode === "new"
-        ? forId || draftEntryId || doc(entriesCol).id
-        : (forId as string); // edit must provide an id
+    const useId = mode === "new" ? forId || draftEntryId || doc(entriesCol).id : (forId as string);
 
     if (mode === "new") setDraftEntryId(useId);
 
@@ -367,17 +415,16 @@ async function computeOpeningForMonth(storeId: string, m: string): Promise<numbe
     const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
     setScanNonce(nonce);
 
-const params = new URLSearchParams({
-  store: String(storeId),
-  entry: useId,
-  date: dateStr || new Date().toISOString().slice(0, 10),
-  vendor: vendor || "", // <-- ADD THIS LINE
-  dept,
-  category: accountsMap.get(accountId) || accountId || "Uncategorized",
-  amount: amountStr || "0",
-  nonce,
-});
-
+    const params = new URLSearchParams({
+      store: String(storeId),
+      entry: useId,
+      date: dateStr || new Date().toISOString().slice(0, 10),
+      vendor: vendor || "",
+      dept,
+      category: accountsMap.get(accountId) || accountId || "Uncategorized",
+      amount: amountStr || "0",
+      nonce,
+    });
 
     window.open(`/scanner-demo?${params.toString()}`, "pc-scan", "width=1200,height=900");
   }
@@ -448,11 +495,17 @@ const params = new URLSearchParams({
     setMsg(null);
     setErr(null);
 
+    if (!user?.uid) {
+      setErr("Please sign in again.");
+      return;
+    }
+
     if (!invoiceUrlRaw) {
       setErr("Please scan the invoice before saving.");
       return;
     }
-    if (!dateStr || !vendor.trim() || !description.trim() || !accountId || amountNum <= 0) {
+
+    if (!dateStr || !vendor.trim() || !description.trim() || !receivedBy.trim() || !accountId || amountNum <= 0) {
       setErr("Please fill all fields.");
       return;
     }
@@ -470,6 +523,7 @@ const params = new URLSearchParams({
         date: dateTs,
         vendor: vendor.trim(),
         description: description.trim(),
+        receivedBy: receivedBy.trim(),
         amount: round2(amountNum),
         hst: round2(hstNum),
         net: round2(Math.max(amountNum - hstNum, 0)),
@@ -479,21 +533,22 @@ const params = new URLSearchParams({
         month,
         createdAt: serverTimestamp(),
         enteredBy: {
-          uid: user?.uid || null,
-          email: user?.email || null,
-          name: user?.displayName || null,
+          uid: user.uid,
+          email: user.email || "",
+          name: user.displayName || user.email || "",
         },
-        invoiceUrl: invoiceUrlRaw,                 // canonical Storage URL
+        invoiceUrl: invoiceUrlRaw, // canonical Storage URL
         invoiceContentType: "application/pdf",
       });
 
-           // Trigger auto-email in the background (backend decides if it should send)
+      // Trigger auto-email in the background (backend decides if it should send)
       triggerInvoiceEmail(String(storeId), newRef.id);
- 
+
       // Reset form fields so the next entry starts clean
       setDateStr(todayStr);
       setVendor("");
       setDescription("");
+      setReceivedBy("");
       setAccountId(accounts[0]?.id ?? "");
       setAmountStr("");
       setHstStr("");
@@ -520,85 +575,173 @@ const params = new URLSearchParams({
       dateStr: dateIso,
       vendor: r.vendor || "",
       description: r.description || "",
+      receivedBy: r.receivedBy || "",
       amountStr: String(r.amount ?? ""),
       hstStr: String(r.hst ?? ""),
       accountId: r.account || "",
       dept: (r.dept || "FOH") as EditState["dept"],
     });
   }
-  function cancelEdit() { setEditingId(null); setEdit(null); }
-
-async function saveEdit() {
-  if (!editingId || !edit) return;
-
-  try {
-    // Parse numbers once
-    const amount = parseFloat(edit.amountStr || "0") || 0;
-    const hst    = parseFloat(edit.hstStr   || "0") || 0;
-
-    // Normalize date + month (same pattern as handleSubmit)
-    const date    = new Date(`${edit.dateStr}T00:00:00`);
-    const dateTs  = Timestamp.fromDate(date);
-    const month   = monthString(date);
-
-    // Resolve account label
-    const accountLabel = accountsMap.get(edit.accountId) || edit.accountId;
-
-    // Current user for audit fields
-    const u = auth.currentUser;
-
-    const ref = doc(db, "stores", String(storeId), "entries", editingId);
-
-    await updateDoc(ref, {
-      date: dateTs,
-      month,
-      vendor:       edit.vendor.trim(),
-      description:  edit.description.trim(),
-      amount:       round2(amount),
-      hst:          round2(hst),
-      net:          round2(Math.max(amount - hst, 0)),
-      account:      accountLabel,
-      accountName:  accountLabel,
-      dept:         edit.dept,
-      updatedAt:    serverTimestamp(),
-      updatedByUid:   u?.uid || null,
-      updatedByEmail: u?.email || null,
-      updatedByName:  u?.displayName || u?.email || null,
-    } as any);
-
+  function cancelEdit() {
     setEditingId(null);
     setEdit(null);
-    await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
-  } catch (e: any) {
-    console.error("Edit failed", e);
-    alert(`Update failed: ${e?.message || String(e)}`);
   }
-}
 
+  async function saveEdit() {
+    if (!editingId || !edit) return;
 
-async function deleteRow(id: string) {
-  if (!confirm("Delete this entry?")) return;
-  try {
+    try {
+      const u = auth.currentUser;
+      if (!u?.uid) throw new Error("Not signed in");
+
+      // Parse numbers once
+      const amount = parseFloat(edit.amountStr || "0") || 0;
+      const hst = parseFloat(edit.hstStr || "0") || 0;
+
+      // Normalize date + month (same pattern as handleSubmit)
+      const date = new Date(`${edit.dateStr}T00:00:00`);
+      const dateTs = Timestamp.fromDate(date);
+      const month = monthString(date);
+
+      // Resolve account label
+      const accountLabel = accountsMap.get(edit.accountId) || edit.accountId;
+
+      const ref = doc(db, "stores", String(storeId), "entries", editingId);
+
+      await updateDoc(ref, {
+        date: dateTs,
+        month,
+        vendor: edit.vendor.trim(),
+        description: edit.description.trim(),
+        receivedBy: edit.receivedBy.trim(),
+        amount: round2(amount),
+        hst: round2(hst),
+        net: round2(Math.max(amount - hst, 0)),
+        account: accountLabel,
+        accountName: accountLabel,
+        dept: edit.dept,
+        updatedAt: serverTimestamp(),
+        updatedByUid: u.uid,
+        updatedByEmail: u.email || "",
+        updatedByName: u.displayName || u.email || "",
+      } as any);
+
+      setEditingId(null);
+      setEdit(null);
+      await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
+    } catch (e: any) {
+      console.error("Edit failed", e);
+      alert(`Update failed: ${e?.message || String(e)}`);
+    }
+  }
+
+  async function deleteRow(id: string) {
+    if (!confirm("Delete this entry?")) return;
+    try {
+      const u = auth.currentUser;
+      if (!u?.uid) throw new Error("Not signed in");
+
+      await updateDoc(doc(db, "stores", String(storeId), "entries", id), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        deletedByUid: u.uid,
+        deletedByName: u.displayName || u.email || "",
+        deletedByEmail: u.email || "",
+        updatedAt: serverTimestamp(),
+        updatedByUid: u.uid,
+        updatedByName: u.displayName || u.email || "",
+        updatedByEmail: u.email || "",
+      } as any);
+
+      await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
+    } catch (e: any) {
+      alert(`Delete failed: ${e?.message || e}`);
+    }
+  }
+
+  // ===== Flag helpers (admin-only UI) =====
+  function beginFlagNoteEdit(entryId: string, existing: string) {
+    setFlagDrafts((p) => ({ ...p, [entryId]: existing ?? "" }));
+    setFlagEditing((p) => ({ ...p, [entryId]: true }));
+  }
+
+  function cancelFlagNoteEdit(entryId: string) {
+    setFlagEditing((p) => {
+      const copy = { ...p };
+      delete copy[entryId];
+      return copy;
+    });
+    setFlagDrafts((p) => {
+      const copy = { ...p };
+      delete copy[entryId];
+      return copy;
+    });
+  }
+
+  async function toggleFlag(entryId: string, next: boolean, existingNote?: string) {
+    if (!isAdmin) return;
+
     const u = auth.currentUser;
-    await updateDoc(doc(db, "stores", String(storeId), "entries", id), {
-      deleted: true,
-      deletedAt: serverTimestamp(),
-      deletedByUid: u?.uid || null,
-      deletedByName: u?.displayName || u?.email || null,
-      deletedByEmail: u?.email || null,
-      // optional audit mirrors:
+    if (!u?.uid) throw new Error("Not signed in");
+
+    const ref = doc(db, "stores", String(storeId), "entries", entryId);
+
+    if (next) {
+      await updateDoc(ref, {
+        flagged: true,
+        flagNote: (existingNote ?? "").trim(),
+        flaggedAt: serverTimestamp(),
+        flaggedByUid: u.uid,
+        flaggedByEmail: u.email || "",
+        flaggedByName: u.displayName || u.email || "",
+        updatedAt: serverTimestamp(),
+        updatedByUid: u.uid,
+        updatedByEmail: u.email || "",
+        updatedByName: u.displayName || u.email || "",
+      } as any);
+
+      // Open the note editor right away so it feels intentional
+      beginFlagNoteEdit(entryId, (existingNote ?? "").trim());
+    } else {
+      await updateDoc(ref, {
+        flagged: false,
+        flagNote: "",
+        updatedAt: serverTimestamp(),
+        updatedByUid: u.uid,
+        updatedByEmail: u.email || "",
+        updatedByName: u.displayName || u.email || "",
+      } as any);
+
+      // Clear local UI state for this entry
+      cancelFlagNoteEdit(entryId);
+    }
+
+    await loadJournal(monthSel);
+  }
+
+  async function saveFlagNote(entryId: string) {
+    if (!isAdmin) return;
+
+    const u = auth.currentUser;
+    if (!u?.uid) throw new Error("Not signed in");
+
+    const note = (flagDrafts[entryId] ?? "").trim();
+    const ref = doc(db, "stores", String(storeId), "entries", entryId);
+
+    await updateDoc(ref, {
+      flagNote: note,
+      // Use existing allowed audit fields (keeps rules happy)
       updatedAt: serverTimestamp(),
-      updatedByUid: u?.uid || null,
-      updatedByName: u?.displayName || u?.email || null,
-      updatedByEmail: u?.email || null,
+      updatedByUid: u.uid,
+      updatedByEmail: u.email || "",
+      updatedByName: u.displayName || u.email || "",
     } as any);
 
-    await Promise.all([loadSummary(monthSel), loadJournal(monthSel)]);
-  } catch (e: any) {
-    alert(`Delete failed: ${e?.message || e}`);
-  }
-}
+    // Lock it down in the UI after save
+    cancelFlagNoteEdit(entryId);
 
+    await loadJournal(monthSel);
+  }
 
   // ===== Vendor suggestions =====
   const recentVendors = useMemo(() => {
@@ -606,7 +749,10 @@ async function deleteRow(id: string) {
     const out: string[] = [];
     journal.slice(0, 50).forEach((r: any) => {
       const v = (r?.vendor || "").trim();
-      if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+      if (v && !seen.has(v)) {
+        seen.add(v);
+        out.push(v);
+      }
     });
     return out.sort((a, b) => a.localeCompare(b, "en"));
   }, [journal]);
@@ -682,7 +828,9 @@ async function deleteRow(id: string) {
               required
             />
             <datalist id="recent-vendors">
-              {recentVendors.map((v) => <option key={v} value={v} />)}
+              {recentVendors.map((v) => (
+                <option key={v} value={v} />
+              ))}
             </datalist>
           </div>
 
@@ -695,16 +843,31 @@ async function deleteRow(id: string) {
               disabled={accLoading || accounts.length === 0}
               required
             >
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name || a.id}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div className="md:col-span-4">
+          <div className="md:col-span-3">
             <label className="block text-sm mb-1">Description of order</label>
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Paper towels, wine, detergent…"
+              className="w-full rounded-md border px-3 py-2"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm mb-1">$ Received By</label>
+            <input
+              value={receivedBy}
+              onChange={(e) => setReceivedBy(e.target.value)}
+              placeholder="Name"
               className="w-full rounded-md border px-3 py-2"
               required
             />
@@ -725,8 +888,12 @@ async function deleteRow(id: string) {
           <div>
             <label className="block text-sm mb-1 flex items-center gap-2">
               HST (optional)
-              <button type="button" className="underline text-xs" onClick={fillHst13} title="13% of amount">13%</button>
-              <button type="button" className="underline text-xs" onClick={() => setHstStr("")} title="Clear HST">clear</button>
+              <button type="button" className="underline text-xs" onClick={fillHst13} title="13% of amount">
+                13%
+              </button>
+              <button type="button" className="underline text-xs" onClick={() => setHstStr("")} title="Clear HST">
+                clear
+              </button>
             </label>
             <input
               inputMode="decimal"
@@ -739,11 +906,7 @@ async function deleteRow(id: string) {
 
           <div>
             <label className="block text-sm mb-1">Net (auto)</label>
-            <input
-              value={netNum.toFixed(2)}
-              readOnly
-              className="w-full rounded-md border px-3 py-2 bg-gray-50"
-            />
+            <input value={netNum.toFixed(2)} readOnly className="w-full rounded-md border px-3 py-2 bg-gray-50" />
           </div>
 
           <div>
@@ -766,11 +929,7 @@ async function deleteRow(id: string) {
         <div className="p-4 border-t">
           <label className="block text-sm font-medium mb-1">Invoice (required)</label>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="px-3 py-2 border rounded"
-              onClick={() => openScanner("new")}
-            >
+            <button type="button" className="px-3 py-2 border rounded" onClick={() => openScanner("new")}>
               {invoiceUrl ? "Re-scan Invoice" : "Scan Invoice"}
             </button>
 
@@ -781,8 +940,8 @@ async function deleteRow(id: string) {
                   className="px-3 py-2 border rounded"
                   onClick={() => {
                     setPreviewUrl(invoiceUrl);
-                    setScanMode("new");        // viewing form’s attachment
-                    setScanningForId(null);    // ensures modal Re-scan uses "new"
+                    setScanMode("new");
+                    setScanningForId(null);
                     setShowInvoice(true);
                   }}
                 >
@@ -821,13 +980,13 @@ async function deleteRow(id: string) {
                   className="px-3 py-1.5 border rounded"
                   onClick={() => {
                     setShowInvoice(false);
-                    try { localStorage.removeItem("pettycash:lastScan"); } catch {}
+                    try {
+                      localStorage.removeItem("pettycash:lastScan");
+                    } catch {}
 
                     if (scanMode === "edit" && scanningForId) {
-                      // editing a journal row
                       openScanner("edit", scanningForId);
                     } else {
-                      // re-scan for the form
                       setInvoiceUrl(null);
                       setInvoiceUrlRaw(null);
                       setPreviewUrl(null);
@@ -848,292 +1007,378 @@ async function deleteRow(id: string) {
         </div>
       )}
 
-{/* Journal */}
-<section className="rounded-xl border bg-white">
-  <div className="p-4 border-b">
-    <h2 className="text-lg font-medium">Journal — {monthSel}</h2>
-  </div>
-
-  <div className="p-4">
-    <div className="mb-2">
-      <label className="inline-flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={showDeletedEntries}
-          onChange={(e) => setShowDeletedEntries(e.target.checked)}
-        />
-        Show deleted
-      </label>
-    </div>
-
-    {/* Only the table can scroll horizontally when needed */}
-    <div className="overflow-x-auto">
-      {jLoading ? (
-        <div className="text-sm text-gray-600">Loading…</div>
-      ) : journalErr ? (
-        <div className="text-sm text-red-700">{journalErr}</div>
-      ) : journal.filter((r) => showDeletedEntries || r.deleted !== true).length === 0 ? (
-        <div className="text-sm text-gray-600">No entries this month.</div>
-      ) : (
-        <table className="min-w-[1100px] table-fixed text-sm w-full">
-          {/* Fixed column widths keep edit inputs inside the row without stretching the page */}
-<colgroup><col className="w-[110px]"/><col className="w-[180px]"/><col className="w-[240px]"/><col className="w-[220px]"/><col className="w-[90px]"/><col className="w-[90px]"/><col className="w-[110px]"/><col className="w-[110px]"/><col className="w-[120px]"/><col className="w-[110px]"/></colgroup>
-          <thead>
-            <tr className="text-left text-gray-600">
-              <th className="py-2 pr-4">Date</th>
-              <th className="py-2 pr-4">Vendor</th>
-              <th className="py-2 pr-4">Description</th>
-              <th className="py-2 pr-4">Account</th>
-              <th className="py-2 pr-4">Dept</th>
-              <th className="py-2 pr-4">Invoice</th>
-              <th className="py-2 pr-4 text-right">Net</th>
-              <th className="py-2 pr-4 text-right">HST</th>
-              <th className="py-2 pr-4 text-right">Total</th>
-              <th className="py-2 pr-4"></th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {journal
-              .filter((r) => showDeletedEntries || r.deleted !== true)
-              .map((r) => {
-                const d: Date = r.date?.toDate?.() || new Date(r.date);
-                const dStr = d.toISOString().slice(0, 10);
-                const accountLabel = r.accountName || accountsMap.get(r.account) || r.account;
-
-                if (editingId === r.id && edit) {
-                  return (
-                    <tr
-                      key={r.id}
-                      className={`border-t align-top ${showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""}`}
-                    >
-                      <td className="py-2 pr-4">
-                        <input
-                          type="date"
-                          value={edit.dateStr}
-                          onChange={(e) => setEdit({ ...edit, dateStr: e.target.value })}
-                          className="w-full rounded border px-2 py-1"
-                        />
-                      </td>
-                      <td className="py-2 pr-4">
-                        <input
-                          value={edit.vendor}
-                          onChange={(e) => setEdit({ ...edit, vendor: e.target.value })}
-                          className="w-full rounded border px-2 py-1"
-                        />
-                      </td>
-                      <td className="py-2 pr-4">
-                        <input
-                          value={edit.description}
-                          onChange={(e) => setEdit({ ...edit, description: e.target.value })}
-                          className="w-full rounded border px-2 py-1"
-                        />
-                      </td>
-                      <td className="py-2 pr-4">
-                        <select
-                          value={edit.accountId}
-                          onChange={(e) => setEdit({ ...edit, accountId: e.target.value })}
-                          className="w-full rounded border px-2 py-1 bg-white"
-                        >
-                          {accounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name || a.id}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-2 pr-4">
-                        <select
-                          value={edit.dept}
-                          onChange={(e) => setEdit({ ...edit, dept: e.target.value as any })}
-                          className="w-full rounded border px-2 py-1 bg-white"
-                        >
-                          <option value="FOH">FOH</option>
-                          <option value="BOH">BOH</option>
-                          <option value="TRAVEL">TRAVEL</option>
-                          <option value="OTHER">OTHER</option>
-                          <option value="BANK">Bank Deposit</option>
-                        </select>
-                      </td>
-                      <td className="py-2 pr-4">
-                        {r.invoiceUrl ? (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              className="underline"
-                              onClick={() => {
-                                setPreviewUrl(`${r.invoiceUrl}${r.invoiceUrl.includes("?") ? "&" : "?"}ts=${Date.now()}`);
-                                setScanMode("edit");
-                                setScanningForId(r.id);
-                                setShowInvoice(true);
-                              }}
-                            >
-                              View
-                            </button>
-                            <a
-                              href={r.invoiceUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="underline text-gray-600"
-                            >
-                              Open ⇗
-                            </a>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-4 text-right">
-                        <input
-                          inputMode="decimal"
-                          value={
-                            edit.amountStr
-                              ? (Math.max((parseFloat(edit.amountStr || "0") || 0) - (parseFloat(edit.hstStr || "0") || 0), 0)).toFixed(2)
-                              : "0.00"
-                          }
-                          readOnly
-                          className="w-full rounded border px-2 py-1 bg-gray-50 text-right"
-                        />
-                      </td>
-                      <td className="py-2 pr-4 text-right">
-                        <input
-                          inputMode="decimal"
-                          value={edit.hstStr}
-                          onChange={(e) => setEdit({ ...edit, hstStr: e.target.value })}
-                          className="w-full rounded border px-2 py-1 text-right"
-                        />
-                      </td>
-                      <td className="py-2 pr-4 text-right">
-                        <input
-                          inputMode="decimal"
-                          value={edit.amountStr}
-                          onChange={(e) => setEdit({ ...edit, amountStr: e.target.value })}
-                          className="w-full rounded border px-2 py-1 text-right"
-                        />
-                      </td>
-                      <td className="py-2 pr-4">
-                        <div className="flex gap-2">
-                          <button className="underline" onClick={saveEdit} type="button">
-                            Save
-                          </button>
-                          <button className="underline" onClick={cancelEdit} type="button">
-                            Cancel
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-
-                return (
-                  <tr key={r.id} className={`border-t ${showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""}`}>
-                    <td className="py-2 pr-4 whitespace-nowrap">{dStr}</td>
-                    <td className="py-2 pr-4 truncate">{r.vendor}</td>
-                    <td className="py-2 pr-4 truncate">{r.description}</td>
-                    <td className="py-2 pr-4 truncate">{accountLabel}</td>
-                    <td className="py-2 pr-4 whitespace-nowrap">{r.dept || ""}</td>
-                    <td className="py-2 pr-4">
-                      {r.invoiceUrl ? (
-                        <button
-                          type="button"
-                          className="underline"
-                          onClick={() => {
-                            setPreviewUrl(`${r.invoiceUrl}${r.invoiceUrl.includes("?") ? "&" : "?"}ts=${Date.now()}`);
-                            setScanMode("edit");
-                            setScanningForId(r.id);
-                            setShowInvoice(true);
-                          }}
-                        >
-                          View
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.net).toFixed(2)}</td>
-                    <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.hst).toFixed(2)}</td>
-                    <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.amount).toFixed(2)}</td>
-                    <td className="py-2 pr-4">
-                      <div className="flex gap-3">
-                        <button className="underline" onClick={() => beginEdit(r)} type="button">
-                          Edit
-                        </button>
-                        <button className="underline" onClick={() => deleteRow(r.id)} type="button">
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
-      )}
-    </div>
-  </div>
-</section>
-
-      {/* --- Export tools --------------------------------------------------- */}
-<section className="rounded-lg border bg-white p-4 mt-6">
-  <h3 className="font-semibold mb-3">Exports</h3>
-  <div className="grid gap-3 sm:grid-cols-2">
-{/* Excel journal (no images) */}
-<button
-  type="button"
-  className="border px-3 py-2 rounded"
-  onClick={() => {
-    // Prevent IdleLogout from firing while the browser handles the download
-    try {
-      localStorage.setItem('pc_download_active', '1');
-      setTimeout(() => { try { localStorage.removeItem('pc_download_active'); } catch {} }, 15000);
-    } catch {}
-
-    window.open(
-      `/api/store/${storeId}/journal-xlsx?m=${monthSel}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
-  }}
->
-  Download Journal (Excel) — {monthSel}
-</button>
-
-{/* Invoices ZIP */}
-<button
-  type="button"
-  className="border px-3 py-2 rounded"
-  onClick={() => {
-    // Prevent IdleLogout from firing while the browser handles the download
-    try {
-      localStorage.setItem('pc_download_active', '1');
-      setTimeout(() => { try { localStorage.removeItem('pc_download_active'); } catch {} }, 15000);
-    } catch {}
-
-    window.open(
-      `/api/store/${storeId}/invoices-zip?m=${monthSel}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
-  }}
->
-  Download All Invoices (ZIP) — {monthSel}
-</button>
-
-  </div>
-  <p className="text-xs text-gray-600 mt-2">
-    Need a custom date range? Use Admin → QBO Export (date-range export).
-  </p>
-</section>
-
-      {/* Recent quick list placeholder */}
+      {/* Journal */}
       <section className="rounded-xl border bg-white">
         <div className="p-4 border-b">
-          <h2 className="text-lg font-medium">Recent entries</h2>
+          <h2 className="text-lg font-medium">Journal — {monthSel}</h2>
         </div>
-        <div className="p-4 overflow-x-auto" />
+
+        <div className="p-4">
+          <div className="mb-2">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showDeletedEntries}
+                onChange={(e) => setShowDeletedEntries(e.target.checked)}
+              />
+              Show deleted
+            </label>
+          </div>
+
+          <div className="overflow-x-auto">
+            {jLoading ? (
+              <div className="text-sm text-gray-600">Loading…</div>
+            ) : journalErr ? (
+              <div className="text-sm text-red-700">{journalErr}</div>
+            ) : journal.filter((r) => showDeletedEntries || r.deleted !== true).length === 0 ? (
+              <div className="text-sm text-gray-600">No entries this month.</div>
+            ) : (
+              <table className="min-w-[1300px] table-fixed text-sm w-full">
+                <colgroup>
+                  {JOURNAL_COL_WIDTHS.map((cls, i) => (
+                    <col key={i} className={cls} />
+                  ))}
+                </colgroup>
+
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 pr-4">Vendor</th>
+                    <th className="py-2 pr-4">Description</th>
+                    <th className="py-2 pr-4">$ Received By</th>
+                    <th className="py-2 pr-4">Account</th>
+                    <th className="py-2 pr-4">Dept</th>
+                    <th className="py-2 pr-4">Invoice</th>
+                    <th className="py-2 pr-4 text-right">Net</th>
+                    <th className="py-2 pr-4 text-right">HST</th>
+                    <th className="py-2 pr-4 text-right">Total</th>
+                    <th className="py-2 pr-4"></th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {journal
+                    .filter((r) => showDeletedEntries || r.deleted !== true)
+                    .map((r) => {
+                      const d: Date = r.date?.toDate?.() || new Date(r.date);
+                      const dStr = d.toISOString().slice(0, 10);
+                      const accountLabel = r.accountName || accountsMap.get(r.account) || r.account;
+
+                      // ----- EDITING ROW -----
+                      if (editingId === r.id && edit) {
+                        return (
+                          <tr
+                            key={r.id}
+                            className={`border-t align-top ${r.flagged ? "text-red-700" : ""} ${
+                              showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""
+                            }`}
+                          >
+                            <td className="py-2 pr-4">
+                              <input
+                                type="date"
+                                value={edit.dateStr}
+                                onChange={(e) => setEdit({ ...edit, dateStr: e.target.value })}
+                                className="w-full rounded border px-2 py-1"
+                              />
+                            </td>
+                            <td className="py-2 pr-4">
+                              <input
+                                value={edit.vendor}
+                                onChange={(e) => setEdit({ ...edit, vendor: e.target.value })}
+                                className="w-full rounded border px-2 py-1"
+                              />
+                            </td>
+                            <td className="py-2 pr-4">
+                              <input
+                                value={edit.description}
+                                onChange={(e) => setEdit({ ...edit, description: e.target.value })}
+                                className="w-full rounded border px-2 py-1"
+                              />
+                            </td>
+                            <td className="py-2 pr-4">
+                              <input
+                                value={edit.receivedBy}
+                                onChange={(e) => setEdit({ ...edit, receivedBy: e.target.value })}
+                                className="w-full rounded border px-2 py-1"
+                              />
+                            </td>
+                            <td className="py-2 pr-4">
+                              <select
+                                value={edit.accountId}
+                                onChange={(e) => setEdit({ ...edit, accountId: e.target.value })}
+                                className="w-full rounded border px-2 py-1 bg-white"
+                              >
+                                {accounts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name || a.id}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 pr-4">
+                              <select
+                                value={edit.dept}
+                                onChange={(e) => setEdit({ ...edit, dept: e.target.value as any })}
+                                className="w-full rounded border px-2 py-1 bg-white"
+                              >
+                                <option value="FOH">FOH</option>
+                                <option value="BOH">BOH</option>
+                                <option value="TRAVEL">TRAVEL</option>
+                                <option value="OTHER">OTHER</option>
+                                <option value="BANK">Bank Deposit</option>
+                              </select>
+                            </td>
+                            <td className="py-2 pr-4">
+                              {r.invoiceUrl ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    className="underline"
+                                    onClick={() => {
+                                      setPreviewUrl(
+                                        `${r.invoiceUrl}${r.invoiceUrl.includes("?") ? "&" : "?"}ts=${Date.now()}`
+                                      );
+                                      setScanMode("edit");
+                                      setScanningForId(r.id);
+                                      setShowInvoice(true);
+                                    }}
+                                  >
+                                    View
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="py-2 pr-4 text-right">
+                              <input
+                                inputMode="decimal"
+                                value={
+                                  edit.amountStr
+                                    ? (
+                                        Math.max(
+                                          (parseFloat(edit.amountStr || "0") || 0) -
+                                            (parseFloat(edit.hstStr || "0") || 0),
+                                          0
+                                        ) || 0
+                                      ).toFixed(2)
+                                    : "0.00"
+                                }
+                                readOnly
+                                className="w-full rounded border px-2 py-1 bg-gray-50 text-right"
+                              />
+                            </td>
+                            <td className="py-2 pr-4 text-right">
+                              <input
+                                inputMode="decimal"
+                                value={edit.hstStr}
+                                onChange={(e) => setEdit({ ...edit, hstStr: e.target.value })}
+                                className="w-full rounded border px-2 py-1 text-right"
+                              />
+                            </td>
+                            <td className="py-2 pr-4 text-right">
+                              <input
+                                inputMode="decimal"
+                                value={edit.amountStr}
+                                onChange={(e) => setEdit({ ...edit, amountStr: e.target.value })}
+                                className="w-full rounded border px-2 py-1 text-right"
+                              />
+                            </td>
+                            <td className="py-2 pr-4">
+                              <div className="flex gap-2">
+                                <button className="underline" onClick={saveEdit} type="button">
+                                  Save
+                                </button>
+                                <button className="underline" onClick={cancelEdit} type="button">
+                                  Cancel
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      // ----- NORMAL ROW + OPTIONAL FLAG NOTE ROW -----
+                      const noteIsEditing = !!flagEditing[r.id];
+                      const lockedNote = (r.flagNote ?? "").trim();
+                      const draftVal = flagDrafts[r.id] ?? r.flagNote ?? "";
+
+                      return (
+                        <Fragment key={r.id}>
+                          <tr
+                            className={`border-t align-top ${r.flagged ? "text-red-700" : ""} ${
+                              showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""
+                            }`}
+                          >
+                            <td className="py-2 pr-4 whitespace-nowrap">{dStr}</td>
+                            <td className="py-2 pr-4 truncate">{r.vendor}</td>
+                            <td className="py-2 pr-4 truncate">{r.description}</td>
+                            <td className="py-2 pr-4 truncate">{r.receivedBy || "—"}</td>
+                            <td className="py-2 pr-4 truncate">{accountLabel}</td>
+                            <td className="py-2 pr-4 whitespace-nowrap">{r.dept || ""}</td>
+                            <td className="py-2 pr-4">
+                              {r.invoiceUrl ? (
+                                <button
+                                  type="button"
+                                  className="underline"
+                                  onClick={() => {
+                                    setPreviewUrl(
+                                      `${r.invoiceUrl}${r.invoiceUrl.includes("?") ? "&" : "?"}ts=${Date.now()}`
+                                    );
+                                    setScanMode("edit");
+                                    setScanningForId(r.id);
+                                    setShowInvoice(true);
+                                  }}
+                                >
+                                  View
+                                </button>
+                              ) : (
+                                <span className="text-xs text-gray-500">—</span>
+                              )}
+                            </td>
+                            <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.net).toFixed(2)}</td>
+                            <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.hst).toFixed(2)}</td>
+                            <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.amount).toFixed(2)}</td>
+                            <td className="py-2 pr-4">
+                              <div className="flex gap-3">
+                                <button className="underline" onClick={() => beginEdit(r)} type="button">
+                                  Edit
+                                </button>
+                                <button className="underline" onClick={() => deleteRow(r.id)} type="button">
+                                  Delete
+                                </button>
+
+                                {isAdmin && (
+                                  <button
+                                    className="underline"
+                                    onClick={() => toggleFlag(r.id, !r.flagged, r.flagNote ?? "")}
+                                    type="button"
+                                  >
+                                    {r.flagged ? "Unflag" : "Flag"}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+
+                          {isAdmin && r.flagged && (
+                            <tr className="border-t bg-red-50">
+                              <td className="py-3 px-4" colSpan={11}>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-sm font-medium text-red-700">Flag note (admin only)</label>
+
+                                  {/* LOCKED VIEW */}
+                                  {!noteIsEditing ? (
+                                    <div className="flex flex-col gap-2">
+                                      {lockedNote ? (
+                                        <div className="rounded border bg-white px-3 py-2 text-sm whitespace-pre-wrap">
+                                          {lockedNote}
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-gray-600 italic">No note saved.</div>
+                                      )}
+
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          className="border px-3 py-1 rounded text-sm bg-white"
+                                          onClick={() => beginFlagNoteEdit(r.id, r.flagNote ?? "")}
+                                        >
+                                          {lockedNote ? "Edit note" : "Add note"}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    /* EDIT MODE */
+                                    <div className="flex flex-col gap-2">
+                                      <textarea
+                                        value={draftVal}
+                                        onChange={(e) => setFlagDrafts((p) => ({ ...p, [r.id]: e.target.value }))}
+                                        className="w-full rounded border px-3 py-2 text-sm"
+                                        rows={3}
+                                        placeholder="Optional note…"
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          className="border px-3 py-1 rounded text-sm bg-white"
+                                          onClick={() => saveFlagNote(r.id)}
+                                        >
+                                          Save note
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="underline text-sm"
+                                          onClick={() => cancelFlagNoteEdit(r.id)}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
       </section>
+
+      {/* --- Export tools --------------------------------------------------- */}
+      <section className="rounded-lg border bg-white p-4 mt-6">
+        <h3 className="font-semibold mb-3">Exports</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Excel journal (no images) */}
+          <button
+            type="button"
+            className="border px-3 py-2 rounded"
+            onClick={() => {
+              try {
+                localStorage.setItem("pc_download_active", "1");
+                setTimeout(() => {
+                  try {
+                    localStorage.removeItem("pc_download_active");
+                  } catch {}
+                }, 15000);
+              } catch {}
+
+              window.open(`/api/store/${storeId}/journal-xlsx?m=${monthSel}`, "_blank", "noopener,noreferrer");
+            }}
+          >
+            Download Journal (Excel) — {monthSel}
+          </button>
+
+          {/* Invoices ZIP */}
+          <button
+            type="button"
+            className="border px-3 py-2 rounded"
+            onClick={() => {
+              try {
+                localStorage.setItem("pc_download_active", "1");
+                setTimeout(() => {
+                  try {
+                    localStorage.removeItem("pc_download_active");
+                  } catch {}
+                }, 15000);
+              } catch {}
+
+              window.open(`/api/store/${storeId}/invoices-zip?m=${monthSel}`, "_blank", "noopener,noreferrer");
+            }}
+          >
+            Download All Invoices (ZIP) — {monthSel}
+          </button>
+        </div>
+        <p className="text-xs text-gray-600 mt-2">Need a custom date range? Use Admin → QBO Export (date-range export).</p>
+      </section>
+
       <div className="h-16 md:hidden" />
-<MobileNav storeId={String(storeId)} active="entries" />
+      <MobileNav storeId={String(storeId)} active="entries" />
     </main>
   );
 }

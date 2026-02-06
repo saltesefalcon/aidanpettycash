@@ -81,6 +81,23 @@ type Opening = {
   updatedByEmail?: string;
 };
 
+type OpeningOverrideLog = {
+  id?: string;
+  month: string;
+
+  amount: number;           // what they set it to
+  previousAmount?: number;  // what it was before (optional but useful)
+  delta?: number;           // amount - previousAmount
+
+  note?: string;
+
+  createdAt?: any;
+  createdByUid?: string;
+  createdByName?: string;
+  createdByEmail?: string;
+};
+
+
 type Deposit = {
   id?: string;
   date: any;
@@ -275,6 +292,10 @@ export default function AdminPage() {
   const [openingNote, setOpeningNote] = useState<string>("");
   const [openLoaded, setOpenLoaded] = useState(false);
   const [openingMeta, setOpeningMeta] = useState<Partial<Opening> | null>(null);
+  
+  // ── Opening override history (per month) ───────────────────────────
+  const [openingLogs, setOpeningLogs] = useState<OpeningOverrideLog[]>([]);
+  const [openingLogsLoaded, setOpeningLogsLoaded] = useState(false);
 
   // ── Cash Submitted form ───────────────────────────────────────────
   const [csDate, setCsDate] = useState(isoToday());
@@ -367,6 +388,39 @@ export default function AdminPage() {
       }
     })();
   }, [storeId, month]);
+
+  // Opening override history load (per month)
+useEffect(() => {
+  if (!storeId || !month) return;
+
+  setOpeningLogsLoaded(false);
+
+  (async () => {
+    try {
+      setErr(null);
+
+      // IMPORTANT: only where("month","==",month). No orderBy -> avoids composite index.
+      const qy = query(
+        collection(db, "stores", String(storeId), "openingBalanceOverrideLogs"),
+        where("month", "==", month)
+      );
+
+      const snap = await getDocs(qy);
+      const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as OpeningOverrideLog[];
+
+      // sort newest-first in the client
+      rows.sort((a: any, b: any) => getTime(b.createdAt) - getTime(a.createdAt));
+
+      setOpeningLogs(rows);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+      setOpeningLogs([]);
+    } finally {
+      setOpeningLogsLoaded(true);
+    }
+  })();
+}, [storeId, month]);
+
 
   // Cash Submitted by month
   useEffect(() => {
@@ -523,61 +577,109 @@ export default function AdminPage() {
 
   // ── Save handlers ─────────────────────────────────────────────────
 
-  async function saveOpening(e: React.FormEvent) {
-    e.preventDefault();
-    if (!storeId || !month) return;
+async function saveOpening(e: React.FormEvent) {
+  e.preventDefault();
+  if (!storeId || !month) return;
 
-    try {
-      setErr(null);
+  try {
+    setErr(null);
 
-      const ref = doc(db, "stores", String(storeId), "openingBalances", month);
-      const existing = await getDoc(ref);
-      const user = me();
-      const now = Timestamp.now();
+    const ref = doc(db, "stores", String(storeId), "openingBalances", month);
+    const existing = await getDoc(ref);
 
-      const preservedCreatedAt =
-        existing.exists() && (existing.data() as any).createdAt
-          ? (existing.data() as any).createdAt
-          : now;
+    const user = me();
+    const now = Timestamp.now();
 
-      const amountNum = Number.isFinite(Number.parseFloat(openingAmt || "0"))
-        ? Number.parseFloat(openingAmt || "0")
-        : 0;
+    const preservedCreatedAt =
+      existing.exists() && (existing.data() as any).createdAt
+        ? (existing.data() as any).createdAt
+        : now;
 
-      await setDoc(
-        ref,
-        {
-          amount: amountNum,
-          note: openingNote || "",
-          createdAt: preservedCreatedAt,
-          updatedAt: now,
-          updatedByUid: user.uid,
-          updatedByName: user.name,
-          updatedByEmail: user.email,
-        },
-        { merge: true }
-      );
+    const amountNum = Number.isFinite(Number.parseFloat(openingAmt || "0"))
+      ? Number.parseFloat(openingAmt || "0")
+      : 0;
 
-      setOpeningMeta((prev) => ({
-        ...(prev || {}),
+    const prevAmount =
+      existing.exists() && typeof (existing.data() as any).amount === "number"
+        ? Number((existing.data() as any).amount)
+        : undefined;
+
+    // 1) Save the opening balance override doc
+    await setDoc(
+      ref,
+      {
         amount: amountNum,
         note: openingNote || "",
         createdAt: preservedCreatedAt,
+        ...(existing.exists()
+          ? {}
+          : {
+              createdByUid: user.uid,
+              createdByName: user.name,
+              createdByEmail: user.email,
+            }),
         updatedAt: now,
         updatedByUid: user.uid,
         updatedByName: user.name,
         updatedByEmail: user.email,
-      }));
+      },
+      { merge: true }
+    );
 
-      const v = await computeOpeningForMonth(String(storeId), month);
-      setOpeningCard(v);
+    // 2) Add a history log row (NO undefined fields)
+    const logPayload: any = {
+      month,
+      amount: amountNum,
+      note: openingNote || "",
+      createdAt: now,
+      createdByUid: user.uid,
+      createdByName: user.name,
+      createdByEmail: user.email,
+    };
 
-      setOpeningAmt("");
-      setOpeningNote("");
-    } catch (e: any) {
-      setErr(e?.message || String(e));
+    if (typeof prevAmount === "number") {
+      logPayload.previousAmount = prevAmount;
+      logPayload.delta = Number((amountNum - prevAmount).toFixed(2));
     }
+
+    await addDoc(
+      collection(db, "stores", String(storeId), "openingBalanceOverrideLogs"),
+      logPayload
+    );
+
+    // Refresh logs immediately
+    const qy = query(
+      collection(db, "stores", String(storeId), "openingBalanceOverrideLogs"),
+      where("month", "==", month)
+    );
+    const snap = await getDocs(qy);
+    const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as OpeningOverrideLog[];
+    rows.sort((a: any, b: any) => getTime(b.createdAt) - getTime(a.createdAt));
+    setOpeningLogs(rows);
+    setOpeningLogsLoaded(true);
+
+    // Update meta + card
+    setOpeningMeta((prev) => ({
+      ...(prev || {}),
+      amount: amountNum,
+      note: openingNote || "",
+      createdAt: preservedCreatedAt,
+      updatedAt: now,
+      updatedByUid: user.uid,
+      updatedByName: user.name,
+      updatedByEmail: user.email,
+    }));
+
+    const v = await computeOpeningForMonth(String(storeId), month);
+    setOpeningCard(v);
+
+    setOpeningAmt("");
+    setOpeningNote("");
+  } catch (e: any) {
+    setErr(e?.message || String(e));
   }
+}
+
 
   // Cash Submitted save
   async function saveCashSubmitted(e: React.FormEvent) {
@@ -1142,6 +1244,56 @@ export default function AdminPage() {
             <span>No override saved for {month}.</span>
           )}
         </div>
+
+        {/* Override change history */}
+<div className="mt-4">
+  <div className="text-sm font-semibold">
+    Override change history — {month}
+  </div>
+
+  {!openingLogsLoaded ? (
+    <div className="mt-2 text-xs text-gray-600">Loading…</div>
+  ) : openingLogs.length === 0 ? (
+    <div className="mt-2 text-xs text-gray-600">No override changes recorded yet.</div>
+  ) : (
+    <div className="mt-2 overflow-x-auto">
+      <table className="min-w-[720px] text-xs">
+        <thead>
+          <tr className="text-left border-b">
+            <th className="py-2 pr-4">When</th>
+            <th className="py-2 pr-4">Set to</th>
+            <th className="py-2 pr-4">Prev</th>
+            <th className="py-2 pr-4">Δ</th>
+            <th className="py-2 pr-4">Note</th>
+            <th className="py-2 pr-4">By</th>
+          </tr>
+        </thead>
+        <tbody>
+          {openingLogs.map((l) => {
+            const who = l.createdByName || l.createdByEmail || (l.createdByUid ? `uid:${l.createdByUid}` : "—");
+            return (
+              <tr key={l.id} className="border-b last:border-b-0">
+                <td className="py-2 pr-4">{l.createdAt?.toDate ? l.createdAt.toDate().toLocaleString() : "—"}</td>
+                <td className="py-2 pr-4">${Number(l.amount || 0).toFixed(2)}</td>
+                <td className="py-2 pr-4">
+                  {typeof l.previousAmount === "number" ? `$${Number(l.previousAmount).toFixed(2)}` : "—"}
+                </td>
+                <td className="py-2 pr-4">
+                  {typeof l.delta === "number" ? (l.delta >= 0 ? `+$${l.delta.toFixed(2)}` : `-$${Math.abs(l.delta).toFixed(2)}`) : "—"}
+                </td>
+                <td className="py-2 pr-4">{l.note || "—"}</td>
+                <td className="py-2 pr-4">
+                  <span className="inline-block rounded px-2 py-0.5 bg-gray-100">{who}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>
+
       </section>
 
       {/* dismissible error */}

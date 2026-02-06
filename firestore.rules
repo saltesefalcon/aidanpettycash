@@ -1,0 +1,489 @@
+// Firestore Security Rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isAuthed() { return request.auth != null; }
+
+    function isString(x) { return x is string && x.size() <= 1024; }
+    function isNumber(x) { return x is number && x >= 0 && x < 10000000; }
+    function isSignedNumber(x) {
+      return x is number && x > -10000000 && x < 10000000;
+    }
+    function isBool(x) { return x is bool; }
+
+    function isAdmin() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
+        && get(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function isEntryOwner() {
+      return isAuthed()
+        && (resource.data.enteredBy is map)
+        && ('uid' in resource.data.enteredBy)
+        && resource.data.enteredBy.uid == request.auth.uid;
+    }
+
+    // creator tagging required on some creates (cashins/deposits)
+    function requireCreator() {
+      return ('createdByUid' in request.resource.data)
+             && request.resource.data.createdByUid == request.auth.uid
+             && (!('createdByName'  in request.resource.data) || isString(request.resource.data.createdByName))
+             && (!('createdByEmail' in request.resource.data) || isString(request.resource.data.createdByEmail));
+    }
+
+    // If soft-deleting, require who/when; otherwise no constraint.
+    function softDeleteConsistent() {
+      return !('deleted' in request.resource.data) || !request.resource.data.deleted
+             || (
+                  ('deletedAt' in request.resource.data && request.resource.data.deletedAt is timestamp) &&
+                  ('deletedByUid' in request.resource.data && request.resource.data.deletedByUid == request.auth.uid) &&
+                  (!('deletedByName'  in request.resource.data) || isString(request.resource.data.deletedByName)) &&
+                  (!('deletedByEmail' in request.resource.data) || isString(request.resource.data.deletedByEmail))
+                );
+    }
+
+    // ---------- entries: immutability ----------
+    function entryImmutableOk() {
+      // Admins: can change date + month, but NOT vendor/createdAt/enteredBy.
+      // Non-admins: original strict behaviour (date + month locked too).
+      return isAdmin()
+        ? (
+            request.resource.data.vendor    == resource.data.vendor &&
+            request.resource.data.createdAt == resource.data.createdAt &&
+            request.resource.data.enteredBy == resource.data.enteredBy
+          )
+        : (
+            request.resource.data.date      == resource.data.date &&
+            request.resource.data.vendor    == resource.data.vendor &&
+            request.resource.data.month     == resource.data.month &&
+            request.resource.data.createdAt == resource.data.createdAt &&
+            request.resource.data.enteredBy == resource.data.enteredBy
+          );
+    }
+
+    // Sanity for editable fields on update
+    function entryUpdateTypesOk() {
+      return
+        isString(request.resource.data.description) &&
+        isNumber(request.resource.data.amount) &&
+        isNumber(request.resource.data.hst) &&
+        isNumber(request.resource.data.net) &&
+        isString(request.resource.data.account) &&
+        (!('accountName' in request.resource.data) || isString(request.resource.data.accountName)) &&
+        (!('dept' in request.resource.data) || isString(request.resource.data.dept)) &&
+        (!('department' in request.resource.data) || isString(request.resource.data.department)) &&
+
+        // NEW:
+        (!('receivedBy' in request.resource.data) || isString(request.resource.data.receivedBy)) &&
+        (!('flagged' in request.resource.data) || isBool(request.resource.data.flagged)) &&
+        (!('flagNote' in request.resource.data) || isString(request.resource.data.flagNote)) &&
+        (!('flaggedAt' in request.resource.data) || request.resource.data.flaggedAt is timestamp) &&
+        (!('flaggedByUid' in request.resource.data) || isString(request.resource.data.flaggedByUid)) &&
+        (!('flaggedByName' in request.resource.data) || isString(request.resource.data.flaggedByName)) &&
+        (!('flaggedByEmail' in request.resource.data) || isString(request.resource.data.flaggedByEmail));
+    }
+
+
+    // If invoice is being (re)attached, require sane types and (optionally) content type.
+    function invoicePatchConsistent() {
+      return
+        (!('invoiceUrl' in request.resource.data) || isString(request.resource.data.invoiceUrl)) &&
+        (!('invoiceContentType' in request.resource.data) || isString(request.resource.data.invoiceContentType)) &&
+        (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
+        (!('updatedByUid' in request.resource.data) || isString(request.resource.data.updatedByUid)) &&
+        (!('updatedByName' in request.resource.data) || isString(request.resource.data.updatedByName)) &&
+        (!('updatedByEmail' in request.resource.data) || isString(request.resource.data.updatedByEmail));
+    }
+
+    // Only these fields may ever appear on an entry document during update
+    function entryAllowedKeys() {
+      return [
+        'date','vendor','description','amount','hst','net',
+        'account','accountName','dept','department','month','createdAt','enteredBy',
+        'invoiceUrl','invoiceContentType',
+        'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+        'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail','receivedBy','flagged','flagNote','flaggedAt','flaggedByUid','flaggedByName','flaggedByEmail'
+      ];
+    }
+
+    // Only allow updates that change whitelisted fields.
+    function entryChangedKeysAllowed() {
+      let changed = request.resource.data.diff(resource.data).changedKeys();
+
+      return isAdmin()
+        ? changed.hasOnly([
+            'date','month',
+            'description','receivedBy','amount','hst','net','account','accountName','dept','department',
+            'invoiceUrl','invoiceContentType',
+            'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+            'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail',
+
+            // admin-only flag fields
+            'flagged','flagNote','flaggedAt','flaggedByUid','flaggedByName','flaggedByEmail'
+          ])
+        : changed.hasOnly([
+            'description','receivedBy','amount','hst','net','account','accountName','dept','department',
+            'invoiceUrl','invoiceContentType',
+            'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+            'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail'
+          ]);
+    }
+
+
+    // ---------- whitelists ----------
+    function cashInAllowedKeys() {
+      return [
+        'date','amount','source','note','month','createdAt',
+        'createdByUid','createdByName','createdByEmail',
+        'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+        'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail'
+      ];
+    }
+
+    function depositAllowedKeys() {
+      return [
+        'date','amount','method','note','month','createdAt',
+        'createdByUid','createdByName','createdByEmail',
+        'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+        'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail'
+      ];
+    }
+
+    function auditAllowedKeys() {
+      return [
+        'date','n5','n10','n20','n50','n100','change','total','month','createdAt',
+        'createdByUid','createdByName','createdByEmail',
+        'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+        'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail'
+      ];
+    }
+
+    function closingBalanceAuditAllowedKeys() {
+      return [
+        'date','amount','note','month','createdAt',
+        'createdByUid','createdByName','createdByEmail',
+        'updatedAt','updatedByUid','updatedByName','updatedByEmail',
+        'deleted','deletedAt','deletedByUid','deletedByName','deletedByEmail'
+      ];
+    }
+
+    // ---------- top-level docs ----------
+    match /stores/{storeId} {
+      allow read: if isAuthed();
+      allow write: if false;
+    }
+
+    match /stores/{storeId}/accounts/{doc} {
+      // Keep reads open (your export and UI can read without auth)
+      allow read: if true;
+      // Allow admins to create/update/delete accounts from the Settings page
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /memberships/{uid} {
+      allow read: if isAuthed() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // ---------- entries ----------
+    function isValidEntry() {
+      return request.resource.data.keys().hasAll(
+        ['date','vendor','description','amount','hst','net','account','month','createdAt']
+      )
+      && request.resource.data.date      is timestamp
+      && isString(request.resource.data.vendor)
+      && isString(request.resource.data.description)
+      && isNumber(request.resource.data.amount)
+      && isNumber(request.resource.data.hst)
+      && isNumber(request.resource.data.net)
+      && isString(request.resource.data.account)
+      && isString(request.resource.data.month)
+      && request.resource.data.createdAt is timestamp
+      && request.resource.data.account != '1050 Petty Cash';
+    }
+
+    match /stores/{storeId}/entries/{doc} {
+      allow read: if true;
+      allow create: if isAuthed() && isValidEntry();
+      allow delete: if false;
+
+      // manager/admin edits
+      allow update: if isAuthed()
+                    && entryChangedKeysAllowed()
+                    && entryImmutableOk()
+                    && entryUpdateTypesOk()
+                    && softDeleteConsistent()
+                    && invoicePatchConsistent();
+    }
+
+    // ---------- cash-ins ----------
+    function isValidCashIn() {
+      return request.resource.data.keys().hasOnly(cashInAllowedKeys())
+        && request.resource.data.keys().hasAll(['date','amount','source','note','month','createdAt'])
+        && request.resource.data.date      is timestamp
+        && isNumber(request.resource.data.amount)
+        && isString(request.resource.data.source)
+        && isString(request.resource.data.note)
+        && isString(request.resource.data.month)
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidCashInUpdate() {
+      let keysOk = request.resource.data.keys().hasOnly(cashInAllowedKeys());
+      let baseOk =
+        request.resource.data.keys().hasAll(['date','amount','source','note','month','createdAt']) &&
+        request.resource.data.date      is timestamp &&
+        isNumber(request.resource.data.amount) &&
+        isString(request.resource.data.source) &&
+        isString(request.resource.data.note) &&
+        isString(request.resource.data.month) &&
+        request.resource.data.createdAt is timestamp;
+      let createdAtImmutable = request.resource.data.createdAt == resource.data.createdAt;
+      let creatorImmutable =
+        (!('createdByUid'   in resource.data) || request.resource.data.createdByUid   == resource.data.createdByUid) &&
+        (!('createdByName'  in resource.data) || request.resource.data.createdByName  == resource.data.createdByName) &&
+        (!('createdByEmail' in resource.data) || request.resource.data.createdByEmail == resource.data.createdByEmail);
+      let auditTypesOk =
+        (!('createdByUid'   in request.resource.data) || isString(request.resource.data.createdByUid)) &&
+        (!('createdByName'  in request.resource.data) || isString(request.resource.data.createdByName)) &&
+        (!('createdByEmail' in request.resource.data) || isString(request.resource.data.createdByEmail)) &&
+        (!('updatedAt'      in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
+        (!('updatedByUid'   in request.resource.data) || isString(request.resource.data.updatedByUid)) &&
+        (!('updatedByName'  in request.resource.data) || isString(request.resource.data.updatedByName)) &&
+        (!('updatedByEmail' in request.resource.data) || isString(request.resource.data.updatedByEmail)) &&
+        (!('deleted'        in request.resource.data) || isBool(request.resource.data.deleted)) &&
+        (!('deletedAt'      in request.resource.data) || request.resource.data.deletedAt is timestamp) &&
+        (!('deletedByUid'   in request.resource.data) || isString(request.resource.data.deletedByUid)) &&
+        (!('deletedByName'  in request.resource.data) || isString(request.resource.data.deletedByName)) &&
+        (!('deletedByEmail' in request.resource.data) || isString(request.resource.data.deletedByEmail));
+      return keysOk && baseOk && createdAtImmutable && creatorImmutable && auditTypesOk && softDeleteConsistent();
+    }
+
+    match /stores/{storeId}/cashins/{doc} {
+      allow read: if true;
+      allow create: if isAuthed() && isValidCashIn() && requireCreator();
+      allow update: if isAuthed() && isValidCashInUpdate();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- cash submitted (admin journal only) ----------
+    match /stores/{storeId}/cashSubmitted/{doc} {
+      allow read: if isAuthed();
+      allow create: if isAuthed() && isValidCashIn();
+      allow update: if isAuthed() && isValidCashInUpdate();
+      allow delete: if false;
+    }
+
+    // ---------- opening balances ----------
+    function isValidOpening() {
+      return request.resource.data.keys().hasAll(['amount','note','createdAt'])
+        && isNumber(request.resource.data.amount)
+        && isString(request.resource.data.note)
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    match /stores/{storeId}/openingBalances/{doc} {
+      allow read: if isAuthed();
+      allow create, update: if isAuthed() && isValidOpening();
+      allow delete: if false;
+    }
+    
+// ---------- opening balance override logs (append-only) ----------
+function isValidOpeningBalanceOverrideLog() {
+  return request.resource.data.keys().hasOnly([
+      'month','amount','previousAmount','delta','note','createdAt',
+      'createdByUid','createdByName','createdByEmail'
+    ])
+    && isString(request.resource.data.month)
+    && isNumber(request.resource.data.amount)
+
+    // optional fields
+    && (!('previousAmount' in request.resource.data) || isNumber(request.resource.data.previousAmount))
+    && (!('delta' in request.resource.data) || isSignedNumber(request.resource.data.delta))
+
+    && isString(request.resource.data.note)
+    && request.resource.data.createdAt is timestamp;
+}
+
+match /stores/{storeId}/openingBalanceOverrideLogs/{doc} {
+  allow read: if isAuthed();
+  allow create: if isAuthed() && isValidOpeningBalanceOverrideLog() && requireCreator();
+  allow update, delete: if false;
+}
+
+match /stores/{storeId}/openingBalanceLogs/{doc} {
+  allow read: if isAuthed();
+  allow create: if isAuthed() && isValidOpeningBalanceOverrideLog() && requireCreator();
+  allow update, delete: if false;
+}
+
+    // ---------- deposits ----------
+    function isValidDeposit() {
+      return request.resource.data.keys().hasOnly(depositAllowedKeys())
+        && request.resource.data.keys().hasAll(['date','amount','method','note','month','createdAt'])
+        && request.resource.data.date      is timestamp
+        && isNumber(request.resource.data.amount)
+        && isString(request.resource.data.method)
+        && isString(request.resource.data.note)
+        && isString(request.resource.data.month)
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidDepositUpdate() {
+      let keysOk = request.resource.data.keys().hasOnly(depositAllowedKeys());
+      let baseOk =
+        request.resource.data.keys().hasAll(['date','amount','method','note','month','createdAt']) &&
+        request.resource.data.date      is timestamp &&
+        isNumber(request.resource.data.amount) &&
+        isString(request.resource.data.method) &&
+        isString(request.resource.data.note) &&
+        isString(request.resource.data.month) &&
+        request.resource.data.createdAt is timestamp;
+      let createdAtImmutable = request.resource.data.createdAt == resource.data.createdAt;
+      let creatorImmutable =
+        (!('createdByUid'   in resource.data) || request.resource.data.createdByUid   == resource.data.createdByUid) &&
+        (!('createdByName'  in resource.data) || request.resource.data.createdByName  == resource.data.createdByName) &&
+        (!('createdByEmail' in resource.data) || request.resource.data.createdByEmail == resource.data.createdByEmail);
+      let auditTypesOk =
+        (!('createdByUid'   in request.resource.data) || isString(request.resource.data.createdByUid)) &&
+        (!('createdByName'  in request.resource.data) || isString(request.resource.data.createdByName)) &&
+        (!('createdByEmail' in request.resource.data) || isString(request.resource.data.createdByEmail)) &&
+        (!('updatedAt'      in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
+        (!('updatedByUid'   in request.resource.data) || isString(request.resource.data.updatedByUid)) &&
+        (!('updatedByName'  in request.resource.data) || isString(request.resource.data.updatedByName)) &&
+        (!('updatedByEmail' in request.resource.data) || isString(request.resource.data.updatedByEmail)) &&
+        (!('deleted'        in request.resource.data) || isBool(request.resource.data.deleted)) &&
+        (!('deletedAt'      in request.resource.data) || request.resource.data.deletedAt is timestamp) &&
+        (!('deletedByUid'   in request.resource.data) || isString(request.resource.data.deletedByUid)) &&
+        (!('deletedByName'  in request.resource.data) || isString(request.resource.data.deletedByName)) &&
+        (!('deletedByEmail' in request.resource.data) || isString(request.resource.data.deletedByEmail));
+      return keysOk && baseOk && createdAtImmutable && creatorImmutable && auditTypesOk && softDeleteConsistent();
+    }
+
+    match /stores/{storeId}/deposits/{doc} {
+      allow read: if isAuthed();
+      allow create: if isAuthed() && isValidDeposit() && requireCreator();
+      allow update: if isAuthed() && isValidDepositUpdate();
+      allow delete: if false;
+    }
+
+    // ---------- audits ----------
+    function isValidAudit() {
+      return request.resource.data.keys().hasOnly(auditAllowedKeys())
+        && request.resource.data.keys().hasAll(
+          ['date','n5','n10','n20','n50','n100','change','total','month','createdAt']
+        )
+        && request.resource.data.date      is timestamp
+        && isNumber(request.resource.data.total)
+        && isString(request.resource.data.month)
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidAuditUpdate() {
+      let keysOk = request.resource.data.keys().hasOnly(auditAllowedKeys());
+      let baseOk =
+        request.resource.data.keys().hasAll(
+          ['date','n5','n10','n20','n50','n100','change','total','month','createdAt']
+        ) &&
+        request.resource.data.date      is timestamp &&
+        isNumber(request.resource.data.total) &&
+        isString(request.resource.data.month) &&
+        request.resource.data.createdAt is timestamp;
+
+      let createdAtImmutable = request.resource.data.createdAt == resource.data.createdAt;
+
+      let creatorImmutable =
+        (!('createdByUid'   in resource.data) || request.resource.data.createdByUid   == resource.data.createdByUid) &&
+        (!('createdByName'  in resource.data) || request.resource.data.createdByName  == resource.data.createdByName) &&
+        (!('createdByEmail' in resource.data) || request.resource.data.createdByEmail == resource.data.createdByEmail);
+
+      let auditTypesOk =
+        (!('createdByUid'   in request.resource.data) || isString(request.resource.data.createdByUid)) &&
+        (!('createdByName'  in request.resource.data) || isString(request.resource.data.createdByName)) &&
+        (!('createdByEmail' in request.resource.data) || isString(request.resource.data.createdByEmail)) &&
+        (!('updatedAt'      in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
+        (!('updatedByUid'   in request.resource.data) || isString(request.resource.data.updatedByUid)) &&
+        (!('updatedByName'  in request.resource.data) || isString(request.resource.data.updatedByName)) &&
+        (!('updatedByEmail' in request.resource.data) || isString(request.resource.data.updatedByEmail)) &&
+        (!('deleted'        in request.resource.data) || isBool(request.resource.data.deleted)) &&
+        (!('deletedAt'      in request.resource.data) || request.resource.data.deletedAt is timestamp) &&
+        (!('deletedByUid'   in request.resource.data) || isString(request.resource.data.deletedByUid)) &&
+        (!('deletedByName'  in request.resource.data) || isString(request.resource.data.deletedByName)) &&
+        (!('deletedByEmail' in request.resource.data) || isString(request.resource.data.deletedByEmail));
+
+      return keysOk && baseOk && createdAtImmutable && creatorImmutable && auditTypesOk && softDeleteConsistent();
+    }
+
+    match /stores/{storeId}/audits/{doc} {
+      allow read: if isAuthed();
+      allow create: if isAuthed() && isValidAudit();
+      allow update: if isAuthed() && isValidAuditUpdate();
+      allow delete: if false;
+    }
+
+    // ---------- closing balance audit ----------
+    function isValidClosingBalanceAudit() {
+      return request.resource.data.keys().hasOnly(closingBalanceAuditAllowedKeys())
+        && request.resource.data.keys().hasAll(['date','amount','note','month','createdAt'])
+        && request.resource.data.date      is timestamp
+        && isSignedNumber(request.resource.data.amount)
+        && isString(request.resource.data.note)
+        && isString(request.resource.data.month)
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidClosingBalanceAuditUpdate() {
+      let keysOk = request.resource.data.keys().hasOnly(closingBalanceAuditAllowedKeys());
+      let baseOk =
+        request.resource.data.keys().hasAll(['date','amount','note','month','createdAt']) &&
+        request.resource.data.date      is timestamp &&
+        isSignedNumber(request.resource.data.amount) &&
+        isString(request.resource.data.note) &&
+        isString(request.resource.data.month) &&
+        request.resource.data.createdAt is timestamp;
+
+      let createdAtImmutable = request.resource.data.createdAt == resource.data.createdAt;
+
+      let creatorImmutable =
+        (!('createdByUid'   in resource.data) || request.resource.data.createdByUid   == resource.data.createdByUid) &&
+        (!('createdByName'  in resource.data) || request.resource.data.createdByName  == resource.data.createdByName) &&
+        (!('createdByEmail' in resource.data) || request.resource.data.createdByEmail == resource.data.createdByEmail);
+
+      let auditTypesOk =
+        (!('createdByUid'   in request.resource.data) || isString(request.resource.data.createdByUid)) &&
+        (!('createdByName'  in request.resource.data) || isString(request.resource.data.createdByName)) &&
+        (!('createdByEmail' in request.resource.data) || isString(request.resource.data.createdByEmail)) &&
+        (!('updatedAt'      in request.resource.data) || request.resource.data.updatedAt is timestamp) &&
+        (!('updatedByUid'   in request.resource.data) || isString(request.resource.data.updatedByUid)) &&
+        (!('updatedByName'  in request.resource.data) || isString(request.resource.data.updatedByName)) &&
+        (!('updatedByEmail' in request.resource.data) || isString(request.resource.data.updatedByEmail)) &&
+        (!('deleted'        in request.resource.data) || isBool(request.resource.data.deleted)) &&
+        (!('deletedAt'      in request.resource.data) || request.resource.data.deletedAt is timestamp) &&
+        (!('deletedByUid'   in request.resource.data) || isString(request.resource.data.deletedByUid)) &&
+        (!('deletedByName'  in request.resource.data) || isString(request.resource.data.deletedByName)) &&
+        (!('deletedByEmail' in request.resource.data) || isString(request.resource.data.deletedByEmail));
+
+      return keysOk && baseOk && createdAtImmutable && creatorImmutable && auditTypesOk && softDeleteConsistent();
+    }
+
+    match /stores/{storeId}/closingBalanceAudits/{doc} {
+      allow read: if isAuthed();
+      allow create: if isAuthed() && isValidClosingBalanceAudit() && requireCreator();
+      allow update: if isAuthed() && isValidClosingBalanceAuditUpdate();
+      allow delete: if false;
+    }
+
+    // Fallback: allow authenticated users to READ any other subcollections under a store.
+    // Writes are still controlled by the more specific rules above.
+    match /stores/{storeId}/{document=**} {
+      allow read: if isAuthed();
+      allow write: if false;
+    }
+
+    // -------- deny everything else --------
+    match /{document=**} { allow read, write: if false; }
+  }
+}
