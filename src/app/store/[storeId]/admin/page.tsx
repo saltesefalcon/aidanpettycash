@@ -551,6 +551,71 @@ useEffect(() => {
     [deposits]
   );
 
+// --- Reconciliation (Cash Submitted must equal Cash In + Deposits on same date) ---
+const toCents = (n: any) => Math.round((Number(n) || 0) * 100);
+
+const cashInCentsByDate = useMemo(() => {
+  const m: Record<string, number> = {};
+  for (const r of cashIns) {
+    if (r.deleted) continue;
+    const k = isoDate(r.date);
+    if (!k) continue;
+    m[k] = (m[k] || 0) + toCents(r.amount);
+  }
+  return m;
+}, [cashIns]);
+
+const depositCentsByDate = useMemo(() => {
+  const m: Record<string, number> = {};
+  for (const r of deposits) {
+    if (r.deleted) continue;
+    const k = isoDate(r.date);
+    if (!k) continue;
+    m[k] = (m[k] || 0) + toCents(r.amount);
+  }
+  return m;
+}, [deposits]);
+
+const submittedCentsByDate = useMemo(() => {
+  const m: Record<string, number> = {};
+  for (const r of cashSubmitted) {
+    if (r.deleted) continue;
+    const k = isoDate(r.date);
+    if (!k) continue;
+    m[k] = (m[k] || 0) + toCents(r.amount);
+  }
+  return m;
+}, [cashSubmitted]);
+
+const reconciliationByDate = useMemo(() => {
+  const out: Record<
+    string,
+    { submitted: number; cashIn: number; deposits: number; diff: number; balanced: boolean }
+  > = {};
+
+  for (const k of Object.keys(submittedCentsByDate)) {
+    const submitted = submittedCentsByDate[k] || 0;
+    const cashIn = cashInCentsByDate[k] || 0;
+    const dep = depositCentsByDate[k] || 0;
+
+    // diff = submitted - (cashIn + deposits)
+    // +diff => short, -diff => over
+    const diff = submitted - (cashIn + dep);
+
+    out[k] = { submitted, cashIn, deposits: dep, diff, balanced: diff === 0 };
+  }
+
+  return out;
+}, [submittedCentsByDate, cashInCentsByDate, depositCentsByDate]);
+
+const unbalancedSubmittedDates = useMemo(() => {
+  return Object.entries(reconciliationByDate)
+    .filter(([, v]) => !v.balanced)
+    .map(([k]) => k);
+}, [reconciliationByDate]);
+
+const fmtCents = (c: number) => (c / 100).toFixed(2);
+
   const opening = openingCard;
   const closing = useMemo(
     () => Number((opening + cashInSum - entriesSum).toFixed(2)),
@@ -679,7 +744,6 @@ async function saveOpening(e: React.FormEvent) {
     setErr(e?.message || String(e));
   }
 }
-
 
   // Cash Submitted save
   async function saveCashSubmitted(e: React.FormEvent) {
@@ -1368,129 +1432,230 @@ async function saveOpening(e: React.FormEvent) {
             </label>
           </div>
 
-          <table className="min-w-[720px] text-sm">
+                  {/* Reconciliation banner */}
+        {cashSubmitted.filter(r => !r.deleted).length > 0 && (
+          <div className="mb-2 text-sm">
+            {unbalancedSubmittedDates.length === 0 ? (
+              <span className="text-green-700">
+                All submitted days are balanced.
+              </span>
+            ) : (
+              <span className="text-red-700">
+                Unbalanced submitted days: {unbalancedSubmittedDates.length}
+              </span>
+            )}
+          </div>
+        )}
+
+
+          <table className="min-w-[980px] text-sm">
             <thead>
               <tr className="text-left border-b">
-                <th className="py-2 pr-4">Date</th>
-                <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Source</th>
-                <th className="py-2 pr-4">Note</th>
-                <th className="py-2 pr-4">By</th>
-                <th className="py-2 pr-4">Actions</th>
+              <th className="py-2 pr-4">Date</th>
+              <th className="py-2 pr-4">Submitted</th>
+              <th className="py-2 pr-4">Cash in</th>
+              <th className="py-2 pr-4">Deposits</th>
+              <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4">Source</th>
+              <th className="py-2 pr-4">Note</th>
+              <th className="py-2 pr-4">By</th>
+              <th className="py-2 pr-4">Actions</th>
+
               </tr>
             </thead>
-            <tbody>
-              {cashSubmitted
-                .filter((r) => showDeletedCashSubmitted || !r.deleted)
-                .map((r) => {
-                  const edited = !!r.updatedAt && !r.deleted;
-                  const rowClass = r.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
-                  const creator =
-                    r.createdByName || r.createdByEmail || (r.createdByUid ? `uid:${r.createdByUid}` : "");
-                  const editor =
-                    r.updatedByName || r.updatedByEmail || (r.updatedByUid ? `uid:${r.updatedByUid}` : "");
+<tbody>
+  {cashSubmitted
+    .filter((r) => showDeletedCashSubmitted || !r.deleted)
+    .map((r) => {
+      const edited = !!r.updatedAt && !r.deleted;
+      const rowClass = r.deleted ? "opacity-60 line-through" : edited ? "bg-yellow-50" : "";
 
-                  if (editingCashSubmitted?.id === r.id) {
-                    return (
-                      <tr key={r.id} className="border-b last:border-b-0">
-                        <td className="py-2 pr-4">
-                          <input
-                            type="date"
-                            className="border px-2 py-1 rounded"
-                            defaultValue={isoDate(r.date)}
-                            onChange={(e) =>
-                              setEditingCashSubmitted((prev) =>
-                                prev ? { ...prev, date: toTs(e.target.value) } : prev
-                              )
-                            }
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            type="number"
-                            step="0.01"
-                            defaultValue={String(r.amount)}
-                            onChange={(e) =>
-                              setEditingCashSubmitted((prev) =>
-                                prev ? { ...(prev as CashSubmitted), amount: Number(e.target.value || 0) } : prev
-                              )
-                            }
-                            className="border px-2 py-1 rounded w-28"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            defaultValue={r.source || ""}
-                            onChange={(e) =>
-                              setEditingCashSubmitted((prev) =>
-                                prev ? { ...(prev as CashSubmitted), source: e.target.value } : prev
-                              )
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <input
-                            defaultValue={r.note || ""}
-                            onChange={(e) =>
-                              setEditingCashSubmitted((prev) =>
-                                prev ? { ...(prev as CashSubmitted), note: e.target.value } : prev
-                              )
-                            }
-                            className="border px-2 py-1 rounded"
-                          />
-                        </td>
-                        <td className="py-2 pr-4 text-xs">
-                          <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>
-                            edit…
-                          </span>
-                        </td>
-                        <td className="py-2 pr-4 space-x-2">
-                          <button className="underline" onClick={onEditCashSubmittedSave}>
-                            Save
-                          </button>
-                          <button className="underline" onClick={() => setEditingCashSubmitted(null)}>
-                            Cancel
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  }
+      const creator =
+        r.createdByName || r.createdByEmail || (r.createdByUid ? `uid:${r.createdByUid}` : "");
+      const editor =
+        r.updatedByName || r.updatedByEmail || (r.updatedByUid ? `uid:${r.updatedByUid}` : "");
 
-                  return (
-                    <tr key={r.id} className={`border-b last:border-b-0 ${rowClass}`}>
-                      <td className="py-2 pr-4">{fmtDate(r.date)}</td>
-                      <td className="py-2 pr-4">{Number(r.amount || 0).toFixed(2)}</td>
-                      <td className="py-2 pr-4">{r.source ?? ""}</td>
-                      <td className="py-2 pr-4">{r.note ?? ""}</td>
-                      <td className="py-2 pr-4 text-xs">
-                        <span
-                          className="inline-block rounded px-2 py-0.5 bg-gray-100"
-                          title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
-                        >
-                          {creator || "—"}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-4 space-x-3">
-                        {!r.deleted && (
-                          <>
-                            <button className="underline" onClick={() => setEditingCashSubmitted(r)}>
-                              Edit
-                            </button>
-                            <button
-                              className="underline text-red-700"
-                              onClick={() => onDeleteCashSubmitted(r.id)}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                        {r.deleted && <span className="text-xs">deleted</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
+      const k = isoDate(r.date);
+      const rec = k ? reconciliationByDate[k] : null;
+
+      const submittedDay = rec?.submitted ?? toCents(r.amount);
+      const cashInDay = rec?.cashIn ?? 0;
+      const depDay = rec?.deposits ?? 0;
+      const diff = rec?.diff ?? 0;
+      const balanced = rec?.balanced ?? true;
+
+      const fmt$ = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+      const statusText =
+        !k ? "—" :
+        balanced ? "BALANCED" :
+        diff > 0 ? `UNBALANCED (short ${fmt$(diff)})` :
+        `UNBALANCED (over ${fmt$(-diff)})`;
+
+      const statusCls =
+        !k ? "bg-gray-100 text-gray-700" :
+        balanced ? "bg-green-100 text-green-800" :
+        "bg-red-100 text-red-800";
+
+      // ----- EDIT ROW -----
+      if (editingCashSubmitted?.id === r.id) {
+        const oldKey = isoDate(r.date);
+        const newKey = isoDate(editingCashSubmitted.date);
+
+        const oldCents = toCents(r.amount);
+        const newCents = toCents(editingCashSubmitted.amount);
+
+        // Preview what the submitted total WOULD be after edit (handles same-day edits correctly)
+        const previewSubmitted =
+          !newKey ? newCents :
+          oldKey === newKey
+            ? (submittedCentsByDate[newKey] || 0) - oldCents + newCents
+            : (submittedCentsByDate[newKey] || 0) + newCents;
+
+        const cinPreview = newKey ? (cashInCentsByDate[newKey] || 0) : 0;
+        const depPreview = newKey ? (depositCentsByDate[newKey] || 0) : 0;
+        const diffPreview = previewSubmitted - (cinPreview + depPreview);
+
+        const balancedPreview = !!newKey && diffPreview === 0;
+
+        const statusTextPreview =
+          !newKey ? "—" :
+          balancedPreview ? "BALANCED" :
+          diffPreview > 0 ? `UNBALANCED (short ${fmt$(diffPreview)})` :
+          `UNBALANCED (over ${fmt$(-diffPreview)})`;
+
+        const statusClsPreview =
+          !newKey ? "bg-gray-100 text-gray-700" :
+          balancedPreview ? "bg-green-100 text-green-800" :
+          "bg-red-100 text-red-800";
+
+        return (
+          <tr key={r.id} className="border-b last:border-b-0">
+            <td className="py-2 pr-4">
+              <input
+                type="date"
+                className="border px-2 py-1 rounded"
+                defaultValue={isoDate(r.date)}
+                onChange={(e) =>
+                  setEditingCashSubmitted((prev) =>
+                    prev ? { ...prev, date: toTs(e.target.value) } : prev
+                  )
+                }
+              />
+            </td>
+
+            <td className="py-2 pr-4">
+              <input
+                type="number"
+                step="0.01"
+                defaultValue={String(r.amount)}
+                onChange={(e) =>
+                  setEditingCashSubmitted((prev) =>
+                    prev ? { ...(prev as CashSubmitted), amount: Number(e.target.value || 0) } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded w-28"
+              />
+            </td>
+
+            <td className="py-2 pr-4 tabular-nums">{fmt$(cinPreview)}</td>
+            <td className="py-2 pr-4 tabular-nums">{fmt$(depPreview)}</td>
+
+            <td className="py-2 pr-4">
+              <span className={`inline-block rounded px-2 py-0.5 text-xs font-semibold ${statusClsPreview}`}>
+                {statusTextPreview}
+              </span>
+            </td>
+
+            <td className="py-2 pr-4">
+              <input
+                defaultValue={r.source || ""}
+                onChange={(e) =>
+                  setEditingCashSubmitted((prev) =>
+                    prev ? { ...(prev as CashSubmitted), source: e.target.value } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded"
+              />
+            </td>
+
+            <td className="py-2 pr-4">
+              <input
+                defaultValue={r.note || ""}
+                onChange={(e) =>
+                  setEditingCashSubmitted((prev) =>
+                    prev ? { ...(prev as CashSubmitted), note: e.target.value } : prev
+                  )
+                }
+                className="border px-2 py-1 rounded"
+              />
+            </td>
+
+            <td className="py-2 pr-4 text-xs">
+              <span title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}>edit…</span>
+            </td>
+
+            <td className="py-2 pr-4 space-x-2">
+              <button type="button" className="underline" onClick={onEditCashSubmittedSave}>
+                Save
+              </button>
+              <button type="button" className="underline" onClick={() => setEditingCashSubmitted(null)}>
+                Cancel
+              </button>
+            </td>
+          </tr>
+        );
+      }
+
+      // ----- NORMAL ROW -----
+      return (
+        <tr key={r.id} className={`border-b last:border-b-0 ${rowClass}`}>
+          <td className="py-2 pr-4">{fmtDate(r.date)}</td>
+
+          <td className="py-2 pr-4 tabular-nums">{fmt$(submittedDay)}</td>
+          <td className="py-2 pr-4 tabular-nums">{fmt$(cashInDay)}</td>
+          <td className="py-2 pr-4 tabular-nums">{fmt$(depDay)}</td>
+
+          <td className="py-2 pr-4">
+            <span className={`inline-block rounded px-2 py-0.5 text-xs font-semibold ${statusCls}`}>
+              {statusText}
+            </span>
+          </td>
+
+          <td className="py-2 pr-4">{r.source ?? ""}</td>
+          <td className="py-2 pr-4">{r.note ?? ""}</td>
+
+          <td className="py-2 pr-4 text-xs">
+            <span
+              className="inline-block rounded px-2 py-0.5 bg-gray-100"
+              title={`Created by ${creator}${editor ? ` • Last edited by ${editor}` : ""}`}
+            >
+              {creator || "—"}
+            </span>
+          </td>
+
+          <td className="py-2 pr-4 space-x-3">
+            {!r.deleted && (
+              <>
+                <button type="button" className="underline" onClick={() => setEditingCashSubmitted(r)}>
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="underline text-red-700"
+                  onClick={() => onDeleteCashSubmitted(r.id)}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+            {r.deleted && <span className="text-xs">deleted</span>}
+          </td>
+        </tr>
+      );
+    })}
+</tbody>
+
           </table>
         </div>
       </section>
