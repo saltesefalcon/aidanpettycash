@@ -1497,37 +1497,45 @@ async function saveOpening(e: React.FormEvent) {
         balanced ? "bg-green-100 text-green-800" :
         "bg-red-100 text-red-800";
 
-      // ----- EDIT ROW -----
-      if (editingCashSubmitted?.id === r.id) {
-        const oldKey = isoDate(r.date);
-        const newKey = isoDate(editingCashSubmitted.date);
+// ----- EDIT ROW -----
+const edit = editingCashSubmitted;
 
-        const oldCents = toCents(r.amount);
-        const newCents = toCents(editingCashSubmitted.amount);
+if (edit && edit.id === r.id) {
+  const oldKey = isoDate(r.date);
+  const newKey = isoDate(edit.date);
 
-        // Preview what the submitted total WOULD be after edit (handles same-day edits correctly)
-        const previewSubmitted =
-          !newKey ? newCents :
-          oldKey === newKey
-            ? (submittedCentsByDate[newKey] || 0) - oldCents + newCents
-            : (submittedCentsByDate[newKey] || 0) + newCents;
+  const oldCents = toCents(r.amount);
+  const newCents = toCents(edit.amount);
 
-        const cinPreview = newKey ? (cashInCentsByDate[newKey] || 0) : 0;
-        const depPreview = newKey ? (depositCentsByDate[newKey] || 0) : 0;
-        const diffPreview = previewSubmitted - (cinPreview + depPreview);
+  // Preview what the submitted total WOULD be after edit (handles same-day edits correctly)
+  const previewSubmitted =
+    !newKey
+      ? newCents
+      : oldKey === newKey
+      ? (submittedCentsByDate[newKey] || 0) - oldCents + newCents
+      : (submittedCentsByDate[newKey] || 0) + newCents;
 
-        const balancedPreview = !!newKey && diffPreview === 0;
+  const cinPreview = newKey ? (cashInCentsByDate[newKey] || 0) : 0;
+  const depPreview = newKey ? (depositCentsByDate[newKey] || 0) : 0;
+  const diffPreview = previewSubmitted - (cinPreview + depPreview);
 
-        const statusTextPreview =
-          !newKey ? "—" :
-          balancedPreview ? "BALANCED" :
-          diffPreview > 0 ? `UNBALANCED (short ${fmt$(diffPreview)})` :
-          `UNBALANCED (over ${fmt$(-diffPreview)})`;
+  const balancedPreview = !!newKey && diffPreview === 0;
 
-        const statusClsPreview =
-          !newKey ? "bg-gray-100 text-gray-700" :
-          balancedPreview ? "bg-green-100 text-green-800" :
-          "bg-red-100 text-red-800";
+  const statusTextPreview =
+    !newKey
+      ? "—"
+      : balancedPreview
+      ? "BALANCED"
+      : diffPreview > 0
+      ? `UNBALANCED (short ${fmt$(diffPreview)})`
+      : `UNBALANCED (over ${fmt$(-diffPreview)})`;
+
+  const statusClsPreview =
+    !newKey
+      ? "bg-gray-100 text-gray-700"
+      : balancedPreview
+      ? "bg-green-100 text-green-800"
+      : "bg-red-100 text-red-800";
 
         return (
           <tr key={r.id} className="border-b last:border-b-0">
