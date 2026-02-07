@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
@@ -9,11 +9,16 @@ import { doc, getDoc } from 'firebase/firestore';
 /**
  * SessionGuard
  * - Renders immediately on /login (no blocking).
- * - For all other routes, waits for auth.
+ * - For all other routes, waits for auth (once).
  * - If role === "manager":
  *     • Allow /store/[storeId]/entries for assigned stores
  *     • Also allow global scanner routes: /scanner-demo and /scanner
  *     • Otherwise redirect to their first allowed store's Entries
+ *
+ * Changes in this version:
+ * - onAuthStateChanged subscription is created ONCE (not re-created on every route change)
+ * - Manager ACL enforcement runs on route changes using cached membership data
+ * - Adds a small grace period before redirecting to /login when user becomes null
  */
 export default function SessionGuard({ children }: { children: React.ReactNode }) {
   const pathnameRaw = usePathname();
@@ -21,19 +26,34 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
   const router = useRouter();
 
   const onLogin = pathname.startsWith('/login');
-  // ✅ mark scanner routes as always allowed for managers
-  const isScanner =
-    pathname.startsWith('/scanner-demo') ||
-    pathname.startsWith('/scanner');
 
-  const [ready, setReady] = useState(onLogin); // /login renders immediately
+  const isScanner = useMemo(() => {
+    return pathname.startsWith('/scanner-demo') || pathname.startsWith('/scanner');
+  }, [pathname]);
+
+  // Render /login immediately; otherwise block until first auth check completes
+  const [ready, setReady] = useState<boolean>(onLogin);
+
   const [role, setRole] = useState<'admin' | 'manager' | ''>('');
   const [allowedStores, setAllowedStores] = useState<string[]>([]);
+  const [membershipLoaded, setMembershipLoaded] = useState<boolean>(false);
 
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearRedirectTimer = () => {
+    if (redirectTimerRef.current) {
+      clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+    }
+  };
+
+  // 1) Subscribe to auth changes ONCE
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
+      clearRedirectTimer();
+
       // /login: if already signed-in, bounce to dashboard; otherwise render immediately
-      if (onLogin) {
+      if (pathname.startsWith('/login')) {
         if (user) router.replace('/dashboard');
         setReady(true);
         return;
@@ -41,62 +61,90 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
 
       // Everywhere else requires auth
       if (!user) {
-        router.replace('/login?reason=auth');
+        // Grace period prevents transient auth blips from instantly nuking the page
+        redirectTimerRef.current = setTimeout(() => {
+          if (!auth.currentUser) {
+            router.replace('/login?reason=auth');
+          }
+        }, 1500);
+
         setReady(true);
         return;
       }
 
+      // User is signed in — load membership once per auth session
       try {
-        // Fetch membership (role + storeIds)
         const snap = await getDoc(doc(db, 'memberships', user.uid));
         const data = snap.data() || {};
+
         const r = (data.role as 'admin' | 'manager' | '') || '';
         const stores = Array.isArray(data.storeIds) ? (data.storeIds as string[]) : [];
 
         setRole(r);
         setAllowedStores(stores);
-
-        // Managers: enforce section + store ACL
-        if (r === 'manager') {
-          // ✅ allow scanner routes without redirect
-          if (isScanner) {
-            return; // stay on /scanner-demo or /scanner
-          }
-
-          // Match /store/[storeId]/[section?]
-          const match = pathname.match(/^\/store\/([^/]+)(?:\/([^/?#]+))?/);
-          const storeOnUrl = match?.[1] ?? '';
-          const section = match?.[2] ?? '';
-
-          // Only "entries" section allowed
-          const sectionAllowed = section === 'entries';
-
-          // Must be one of their allowed stores
-          const storeAllowed = !!storeOnUrl && stores.includes(storeOnUrl);
-
-          // Choose a safe destination
-          const targetStore = storeAllowed ? storeOnUrl : (stores[0] || '');
-
-          // If the current path is not allowed, redirect to safe Entries route
-          if (!sectionAllowed || !storeAllowed) {
-            if (targetStore) {
-              const target = `/store/${targetStore}/entries`;
-              if (pathname !== target) router.replace(target);
-            } else {
-              // No assigned stores -> sign out or send to login with reason
-              router.replace('/login?reason=not-authorized');
-            }
-          }
-        }
+      } catch (e) {
+        // If membership read fails for any reason, don't hard-redirect here.
+        // Firestore rules still protect data; UI routing is just a convenience.
+        setRole('');
+        setAllowedStores([]);
+        // eslint-disable-next-line no-console
+        console.error('SessionGuard: failed to read memberships/{uid}', e);
       } finally {
+        setMembershipLoaded(true);
         setReady(true);
       }
     });
 
-    return unsub;
+    return () => {
+      clearRedirectTimer();
+      unsub();
+    };
+    // router is stable; do NOT include pathname here (we don't want re-subscribe per route change)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onLogin, isScanner, pathname]);
+  }, [router]);
 
-  if (!ready) return null; // could render a tiny skeleton here
+  // 2) Enforce manager ACL on route changes (using cached membership)
+  useEffect(() => {
+    // /login should never be blocked
+    if (onLogin) return;
+
+    // Don’t enforce until we’ve checked auth at least once
+    if (!ready) return;
+
+    const user = auth.currentUser;
+    if (!user) return; // redirect handled by auth listener
+
+    // Only enforce after membership is loaded (otherwise we can bounce incorrectly)
+    if (!membershipLoaded) return;
+
+    if (role !== 'manager') return;
+
+    // Managers: allow scanner routes always
+    if (isScanner) return;
+
+    // Match /store/[storeId]/[section?]
+    const match = pathname.match(/^\/store\/([^/]+)(?:\/([^/?#]+))?/);
+    const storeOnUrl = match?.[1] ?? '';
+    const section = match?.[2] ?? '';
+
+    // Only "entries" section allowed for managers
+    const sectionAllowed = section === 'entries';
+
+    // Must be one of their allowed stores
+    const storeAllowed = !!storeOnUrl && allowedStores.includes(storeOnUrl);
+
+    const targetStore = storeAllowed ? storeOnUrl : (allowedStores[0] || '');
+
+    if (!sectionAllowed || !storeAllowed) {
+      if (targetStore) {
+        const target = `/store/${targetStore}/entries`;
+        if (pathname !== target) router.replace(target);
+      } else {
+        router.replace('/login?reason=not-authorized');
+      }
+    }
+  }, [allowedStores, isScanner, membershipLoaded, onLogin, pathname, ready, role, router]);
+
+  if (!ready) return null;
   return <>{children}</>;
 }
