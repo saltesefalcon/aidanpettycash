@@ -18,6 +18,28 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
         && get(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.role == "admin";
     }
+    
+        // ===== Journal month lock helpers =====
+    function lockDocPath(storeId, ym) {
+      return /databases/$(database)/documents/stores/$(storeId)/journalLocks/$(ym);
+    }
+
+    function isMonthKey(ym) {
+      return (ym is string) && ym.matches('^\\d{4}-\\d{2}$');
+    }
+
+    function isMonthLocked(storeId, ym) {
+      return isMonthKey(ym)
+        && exists(lockDocPath(storeId, ym))
+        && get(lockDocPath(storeId, ym)).data.locked == true;
+    }
+
+    // For create/update rules: prefer request.resource.data.month, fallback to resource.data.month
+    function monthFromWrite() {
+      return (request.resource.data.month is string)
+        ? request.resource.data.month
+        : ((resource.data.month is string) ? resource.data.month : "");
+    }
 
     function isEntryOwner() {
       return isAuthed()
@@ -76,6 +98,8 @@ service cloud.firestore {
         (!('dept' in request.resource.data) || isString(request.resource.data.dept)) &&
         (!('department' in request.resource.data) || isString(request.resource.data.department)) &&
 
+        isMonthKey(request.resource.data.month) &&
+        
         // NEW:
         (!('receivedBy' in request.resource.data) || isString(request.resource.data.receivedBy)) &&
         (!('flagged' in request.resource.data) || isBool(request.resource.data.flagged)) &&
@@ -182,6 +206,12 @@ service cloud.firestore {
       // Allow admins to create/update/delete accounts from the Settings page
       allow create, update, delete: if isAdmin();
     }
+    
+        // ===== Journal month locks (per YYYY-MM) =====
+    match /stores/{storeId}/journalLocks/{ym} {
+      allow read: if isAuthed();
+      allow create, update, delete: if isAdmin() && isMonthKey(ym);
+    }
 
     match /memberships/{uid} {
       allow read: if isAuthed() && request.auth.uid == uid;
@@ -200,18 +230,22 @@ service cloud.firestore {
       && isNumber(request.resource.data.hst)
       && isNumber(request.resource.data.net)
       && isString(request.resource.data.account)
-      && isString(request.resource.data.month)
+      && isMonthKey(request.resource.data.month)
       && request.resource.data.createdAt is timestamp
       && request.resource.data.account != '1050 Petty Cash';
     }
 
     match /stores/{storeId}/entries/{doc} {
       allow read: if true;
-      allow create: if isAuthed() && isValidEntry();
+      allow create: if isAuthed()
+  			&& isValidEntry()
+  			&& (isAdmin() || !isMonthLocked(storeId, request.resource.data.month));
+
       allow delete: if false;
 
       // manager/admin edits
       allow update: if isAuthed()
+      							&& (isAdmin() || !isMonthLocked(storeId, monthFromWrite()))
                     && entryChangedKeysAllowed()
                     && entryImmutableOk()
                     && entryUpdateTypesOk()
@@ -227,7 +261,7 @@ service cloud.firestore {
         && isNumber(request.resource.data.amount)
         && isString(request.resource.data.source)
         && isString(request.resource.data.note)
-        && isString(request.resource.data.month)
+        && isMonthKey(request.resource.data.month)
         && request.resource.data.createdAt is timestamp;
     }
 
@@ -239,7 +273,7 @@ service cloud.firestore {
         isNumber(request.resource.data.amount) &&
         isString(request.resource.data.source) &&
         isString(request.resource.data.note) &&
-        isString(request.resource.data.month) &&
+        isMonthKey(request.resource.data.month) &&
         request.resource.data.createdAt is timestamp;
       let createdAtImmutable = request.resource.data.createdAt == resource.data.createdAt;
       let creatorImmutable =
@@ -264,16 +298,27 @@ service cloud.firestore {
 
     match /stores/{storeId}/cashins/{doc} {
       allow read: if true;
-      allow create: if isAuthed() && isValidCashIn() && requireCreator();
-      allow update: if isAuthed() && isValidCashInUpdate();
+      allow create: if isAuthed()
+  			&& isValidCashIn()
+  			&& requireCreator()
+  			&& (isAdmin() || !isMonthLocked(storeId, request.resource.data.month));
+
+      allow update: if isAuthed()
+  			&& (isAdmin() || !isMonthLocked(storeId, monthFromWrite()))
+  			&& isValidCashInUpdate();
+
       allow delete: if isAdmin();
     }
 
     // ---------- cash submitted (admin journal only) ----------
     match /stores/{storeId}/cashSubmitted/{doc} {
       allow read: if isAuthed();
-      allow create: if isAuthed() && isValidCashIn();
-      allow update: if isAuthed() && isValidCashInUpdate();
+			allow create: if isAuthed()
+  			&& isValidCashIn()
+  			&& (isAdmin() || !isMonthLocked(storeId, request.resource.data.month));
+			allow update: if isAuthed()
+  			&& (isAdmin() || !isMonthLocked(storeId, monthFromWrite()))
+  			&& isValidCashInUpdate();
       allow delete: if false;
     }
 
@@ -287,7 +332,9 @@ service cloud.firestore {
 
     match /stores/{storeId}/openingBalances/{doc} {
       allow read: if isAuthed();
-      allow create, update: if isAuthed() && isValidOpening();
+      allow create, update: if isAuthed()
+  			&& isValidOpening()
+  			&& (isAdmin() || !isMonthLocked(storeId, doc));
       allow delete: if false;
     }
     
@@ -297,7 +344,7 @@ function isValidOpeningBalanceOverrideLog() {
       'month','amount','previousAmount','delta','note','createdAt',
       'createdByUid','createdByName','createdByEmail'
     ])
-    && isString(request.resource.data.month)
+    && isMonthKey(request.resource.data.month)
     && isNumber(request.resource.data.amount)
 
     // optional fields

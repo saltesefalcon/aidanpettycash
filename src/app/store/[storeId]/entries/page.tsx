@@ -121,8 +121,14 @@ export default function EntriesPage() {
   }
 
   // ===== Auth (for enteredBy) =====
-  const [user, setUser] = useState<User | null>(auth.currentUser);
-  useEffect(() => onAuthStateChanged(auth, setUser), []);
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    return onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthReady(true);
+    });
+  }, []);
 
   const [role, setRole] = useState<"admin" | "manager" | "">("");
   const isAdmin = role === "admin";
@@ -142,11 +148,17 @@ export default function EntriesPage() {
   // ===== Store name (optional) =====
   const [storeName, setStoreName] = useState<string | null>(null);
   useEffect(() => {
+    if (!authReady || !user?.uid) return;
     (async () => {
-      const s = await getDoc(doc(db, "stores", String(storeId)));
-      if (s.exists()) setStoreName(((s.data() as any).name as string) || null);
+      try {
+        const s = await getDoc(doc(db, "stores", String(storeId)));
+        if (s.exists()) setStoreName(((s.data() as any).name as string) || null);
+        else setStoreName(null);
+      } catch {
+        setStoreName(null);
+      }
     })();
-  }, [storeId]);
+  }, [authReady, user?.uid, storeId]);
 
   // ===== Accounts (map id -> name) =====
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -181,6 +193,103 @@ export default function EntriesPage() {
     sp.set("m", m);
     router.replace(`?${sp.toString()}`, { scroll: false });
   }
+
+
+  // ===== Month Lock (per YYYY-MM) =====
+  const [monthIsLocked, setMonthIsLocked] = useState<boolean>(false);
+  const [lockLoaded, setLockLoaded] = useState<boolean>(false);
+  const [lockCache, setLockCache] = useState<Record<string, boolean>>({});
+
+  const isManager = role === "manager";
+  const managerWriteBlocked = isManager && monthIsLocked;
+
+  useEffect(() => {
+    if (!authReady || !user?.uid) return;
+    if (!storeId || !monthSel) return;
+
+    const ref = doc(db, "stores", String(storeId), "journalLocks", monthSel);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const locked = snap.exists() ? (snap.data() as any).locked === true : false;
+        setMonthIsLocked(locked);
+        setLockLoaded(true);
+        setLockCache((prev) => ({ ...prev, [monthSel]: locked }));
+      },
+      () => {
+        // If lock doc can't be read for any reason, default UI to unlocked.
+        // Firestore rules still enforce the real lock.
+        setMonthIsLocked(false);
+        setLockLoaded(true);
+      }
+    );
+
+    return () => unsub();
+  }, [authReady, user?.uid, storeId, monthSel]);
+
+  const lockMessage = (ym: string) =>
+    "This month is locked. Please change the entry date or ask an administrator to unlock it.";
+
+  async function getIsLocked(ym: string): Promise<boolean> {
+    const key = (ym || "").trim();
+    if (!key) return false;
+
+    if (lockCache[key] !== undefined) return lockCache[key];
+
+    try {
+      const snap = await getDoc(doc(db, "stores", String(storeId), "journalLocks", key));
+      const locked = snap.exists() ? (snap.data() as any).locked === true : false;
+      setLockCache((prev) => ({ ...prev, [key]: locked }));
+      return locked;
+    } catch {
+      return false;
+    }
+  }
+
+  async function assertUnlocked(ym: string): Promise<boolean> {
+    if (isAdmin) return true; // admins are never blocked
+    const locked = await getIsLocked(ym);
+    if (locked) {
+      alert(lockMessage(ym));
+      return false;
+    }
+    return true;
+  }
+
+  async function toggleMonthLock() {
+    if (!isAdmin) return;
+    if (!storeId || !monthSel) return;
+
+    const nextLocked = !monthIsLocked;
+    const ref = doc(db, "stores", String(storeId), "journalLocks", monthSel);
+
+    if (nextLocked) {
+      await setDoc(
+        ref,
+        {
+          locked: true,
+          lockedAt: serverTimestamp(),
+          lockedByUid: user?.uid || null,
+          lockedByName: (user?.displayName as any) || null,
+          lockedByEmail: user?.email || null,
+        },
+        { merge: true }
+      );
+    } else {
+      await setDoc(
+        ref,
+        {
+          locked: false,
+          updatedAt: serverTimestamp(),
+          updatedByUid: user?.uid || null,
+          updatedByName: (user?.displayName as any) || null,
+          updatedByEmail: user?.email || null,
+        },
+        { merge: true }
+      );
+    }
+  }
+
 
   // ===== Summary cards =====
   const [opening, setOpening] = useState<number>(0);
@@ -261,9 +370,10 @@ export default function EntriesPage() {
   }
 
   useEffect(() => {
+    if (!authReady || !user?.uid) return;
     loadSummary(monthSel);
     loadJournal(monthSel);
-  }, [storeId, monthSel]); // eslint-disable-line
+  }, [authReady, user?.uid, storeId, monthSel]); // eslint-disable-line
 
   // ===== New-entry form =====
   const [dateStr, setDateStr] = useState(todayStr);
@@ -299,6 +409,7 @@ export default function EntriesPage() {
 
   // Live cash-ins total (ignores soft-deleted)
   useEffect(() => {
+    if (!authReady || !user?.uid) return;
     if (!storeId) return;
     const qCashins = query(
       collection(db, "stores", String(storeId), "cashins"),
@@ -314,10 +425,11 @@ export default function EntriesPage() {
       setCashIn(round2(total));
     });
     return () => unsub();
-  }, [storeId, monthSel]);
+  }, [authReady, user?.uid, storeId, monthSel]);
 
   // Live cash-out + HST totals
   useEffect(() => {
+    if (!authReady || !user?.uid) return;
     if (!storeId) return;
     const qEntries = query(
       collection(db, "stores", String(storeId), "entries"),
@@ -337,10 +449,11 @@ export default function EntriesPage() {
       setHstTotal(round2(hstSum));
     });
     return () => unsub();
-  }, [storeId, monthSel]);
+  }, [authReady, user?.uid, storeId, monthSel]);
 
   // Live opening balance (override else computed from previous month)
   useEffect(() => {
+    if (!authReady || !user?.uid) return;
     if (!storeId) return;
     const ref = doc(db, "stores", String(storeId), "openingBalances", monthSel);
     const unsub = onSnapshot(ref, async () => {
@@ -348,7 +461,7 @@ export default function EntriesPage() {
       setOpening(round2(v));
     });
     return () => unsub();
-  }, [storeId, monthSel]);
+  }, [authReady, user?.uid, storeId, monthSel]);
 
   // Compute opening for month m as either:
   // 1) explicit override in /openingBalances/{m}, else
@@ -396,6 +509,12 @@ export default function EntriesPage() {
 
   // ------- Scanner integration -------
   function openScanner(mode: "new" | "edit", forId?: string) {
+    if (!storeId) return;
+
+    if (!isAdmin && monthIsLocked) {
+      alert(lockMessage(monthSel));
+      return;
+    }
     // For a brand-new entry scan, clear only the form's attachment UI
     if (mode === "new") {
       setInvoiceUrl(null);
@@ -516,6 +635,8 @@ export default function EntriesPage() {
       const dateTs = Timestamp.fromDate(date);
       const month = monthString(date);
 
+      if (!(await assertUnlocked(month))) return;
+
       const entriesCol = collection(db, "stores", String(storeId), "entries");
       const newRef = draftEntryId ? doc(entriesCol, draftEntryId) : doc(entriesCol);
 
@@ -603,6 +724,8 @@ export default function EntriesPage() {
       const dateTs = Timestamp.fromDate(date);
       const month = monthString(date);
 
+      if (!(await assertUnlocked(month))) return;
+
       // Resolve account label
       const accountLabel = accountsMap.get(edit.accountId) || edit.accountId;
 
@@ -635,7 +758,10 @@ export default function EntriesPage() {
     }
   }
 
-  async function deleteRow(id: string) {
+  async function deleteRow(id: string, ym?: string) {
+    const month = ym || monthSel;
+    if (!(await assertUnlocked(month))) return;
+
     if (!confirm("Delete this entry?")) return;
     try {
       const u = auth.currentUser;
@@ -766,9 +892,34 @@ export default function EntriesPage() {
           {(storeName || storeId) + " · Entries"}
         </h1>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap justify-end">
           <label className="text-sm">Month</label>
           <MonthPicker value={monthSel} onChange={setMonthAndUrl} yearStart={2025} yearEnd={2035} />
+
+          <span
+            className={[
+              "inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold",
+              !lockLoaded
+                ? "bg-gray-100 text-gray-700"
+                : monthIsLocked
+                ? "bg-red-100 text-red-800"
+                : "bg-green-100 text-green-800",
+            ].join(" ")}
+            title="Managers cannot add/edit/delete entries while a month is locked."
+          >
+            {!lockLoaded ? "…" : monthIsLocked ? "LOCKED" : "UNLOCKED"}
+          </span>
+
+          {isAdmin && (
+            <button
+              type="button"
+              className="text-xs underline"
+              onClick={toggleMonthLock}
+            >
+              {monthIsLocked ? "Unlock month" : "Lock month"}
+            </button>
+          )}
+
           <div className="text-xs text-gray-600">HST helper: {Math.round(HST_RATE * 100)}%</div>
         </div>
       </div>
@@ -804,12 +955,19 @@ export default function EntriesPage() {
           <h2 className="text-lg font-medium">Add petty cash entry</h2>
         </div>
 
+        {managerWriteBlocked && (
+          <div className="p-4 border-b bg-red-50 text-red-800 text-sm">
+            This month is locked. You can view it, but you can’t add or edit entries. Ask an admin to unlock the month.
+          </div>
+        )}
+
         {/* Fields grid */}
         <div className="p-4 grid gap-4 md:grid-cols-4">
           <div>
             <label className="block text-sm mb-1">Date</label>
             <input
               type="date"
+              disabled={managerWriteBlocked}
               value={dateStr}
               onChange={(e) => setDateStr(e.target.value)}
               className="w-full rounded-md border px-3 py-2"
@@ -821,6 +979,7 @@ export default function EntriesPage() {
             <label className="block text-sm mb-1">Vendor</label>
             <input
               value={vendor}
+              disabled={managerWriteBlocked}
               onChange={(e) => setVendor(e.target.value)}
               placeholder="LCBO / Costco / …"
               className="w-full rounded-md border px-3 py-2"
@@ -837,6 +996,7 @@ export default function EntriesPage() {
           <div>
             <label className="block text-sm mb-1">Account</label>
             <select
+              disabled={managerWriteBlocked}
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               className="w-full rounded-md border px-3 py-2 bg-white"
@@ -855,6 +1015,7 @@ export default function EntriesPage() {
             <label className="block text-sm mb-1">Description of order</label>
             <input
               value={description}
+              disabled={managerWriteBlocked}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Paper towels, wine, detergent…"
               className="w-full rounded-md border px-3 py-2"
@@ -866,6 +1027,7 @@ export default function EntriesPage() {
             <label className="block text-sm mb-1">$ Received By</label>
             <input
               value={receivedBy}
+              disabled={managerWriteBlocked}
               onChange={(e) => setReceivedBy(e.target.value)}
               placeholder="Name"
               className="w-full rounded-md border px-3 py-2"
@@ -878,6 +1040,7 @@ export default function EntriesPage() {
             <input
               inputMode="decimal"
               value={amountStr}
+              disabled={managerWriteBlocked}
               onChange={(e) => setAmountStr(e.target.value)}
               placeholder="148.00"
               className="w-full rounded-md border px-3 py-2"
@@ -898,6 +1061,7 @@ export default function EntriesPage() {
             <input
               inputMode="decimal"
               value={hstStr}
+              disabled={managerWriteBlocked}
               onChange={(e) => setHstStr(e.target.value)}
               placeholder="0.00"
               className="w-full rounded-md border px-3 py-2"
@@ -912,6 +1076,7 @@ export default function EntriesPage() {
           <div>
             <label className="block text-sm mb-1">Department</label>
             <select
+              disabled={managerWriteBlocked}
               value={dept}
               onChange={(e) => setDept(e.target.value as any)}
               className="w-full rounded-md border px-3 py-2 bg-white"
@@ -1186,7 +1351,15 @@ export default function EntriesPage() {
                             </td>
                             <td className="py-2 pr-4">
                               <div className="flex gap-2">
-                                <button className="underline" onClick={saveEdit} type="button">
+                                <button
+                                  className={
+                                    managerWriteBlocked
+                                      ? "underline opacity-50 cursor-not-allowed"
+                                      : "underline"
+                                  }
+                                  onClick={saveEdit}
+                                  type="button"
+                                >
                                   Save
                                 </button>
                                 <button className="underline" onClick={cancelEdit} type="button">
@@ -1241,10 +1414,22 @@ export default function EntriesPage() {
                             <td className="py-2 pr-4 text-right whitespace-nowrap">${Number(r.amount).toFixed(2)}</td>
                             <td className="py-2 pr-4">
                               <div className="flex gap-3">
-                                <button className="underline" onClick={() => beginEdit(r)} type="button">
+                                <button
+                      className={
+                        managerWriteBlocked ? "underline opacity-50 cursor-not-allowed" : "underline"
+                      }
+                      onClick={() => beginEdit(r)}
+                      type="button"
+                    >
                                   Edit
                                 </button>
-                                <button className="underline" onClick={() => deleteRow(r.id)} type="button">
+                                <button
+                      className={
+                        managerWriteBlocked ? "underline opacity-50 cursor-not-allowed" : "underline"
+                      }
+                      onClick={() => deleteRow(r.id, r.month)}
+                      type="button"
+                    >
                                   Delete
                                 </button>
 
