@@ -996,13 +996,13 @@ export default function EntriesPage() {
           <div>
             <label className="block text-sm mb-1">Account</label>
             <select
-              disabled={managerWriteBlocked}
+              disabled={managerWriteBlocked || accLoading || accounts.length === 0}
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               className="w-full rounded-md border px-3 py-2 bg-white"
-              disabled={accLoading || accounts.length === 0}
               required
             >
+
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name || a.id}
