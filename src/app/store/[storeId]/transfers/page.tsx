@@ -241,7 +241,7 @@ function buildTransferPdf(args: {
 
   for (const it of args.items) {
     if (y > pageH - M * 4) {
-      docp.addPage({ orientation: 'landscape', unit: 'pt', format: [W_IN * 72, H_IN * 72] });
+      docp.addPage([W_IN * 72, H_IN * 72], 'landscape');
       y = M;
 
       docp.setFont('courier', 'bold');
