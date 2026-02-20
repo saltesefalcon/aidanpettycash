@@ -1,13 +1,12 @@
 import 'server-only';
 
-export const runtime = 'nodejs';
-
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import nodemailer from 'nodemailer';
 import { FieldValue } from 'firebase-admin/firestore';
-
 import { adminAuth, adminDb, adminBucket } from '@/lib/firebaseAdmin';
 import { STORE_INFO } from '@/lib/stores';
+
+export const runtime = 'nodejs';
 
 const STORE_EMAILS: Record<string, string> = {
   tulia: 'accounts@tuliaosteria.com',
@@ -28,8 +27,12 @@ function toDateOnly(t: any) {
   return d.toISOString().slice(0, 10);
 }
 
-export async function POST(req: Request, ctx: { params: { storeId: string } }) {
-  const storeId = (ctx.params.storeId || '').toLowerCase();
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ storeId: string }> }
+) {
+  const { storeId: storeIdRaw } = await params;
+  const storeId = (storeIdRaw || '').toLowerCase();
 
   let transferId = '';
   try {
@@ -68,8 +71,11 @@ export async function POST(req: Request, ctx: { params: { storeId: string } }) {
       return NextResponse.json({ ok: false, error: 'Missing store email mapping' }, { status: 500 });
     }
 
-    const fromName = STORE_INFO[fromId]?.name || fromId;
-    const toName = STORE_INFO[toId]?.name || toId;
+    const fromKey = fromId as keyof typeof STORE_INFO;
+    const toKey = toId as keyof typeof STORE_INFO;
+
+    const fromName = STORE_INFO[fromKey]?.name ?? fromId;
+    const toName = STORE_INFO[toKey]?.name ?? toId;
 
     const dateStr = toDateOnly(t.date);
     const subject = `${fromName} to ${toName} Aidan Transfer ${dateStr}`;
