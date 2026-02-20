@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 
-type NavKey = "entries" | "admin" | "qbo" | "settings" | "dashboard";
+type NavKey = "entries" | "transfers" | "admin" | "qbo" | "settings" | "dashboard";
 
 export default function MobileNav({
   storeId,
@@ -19,7 +19,9 @@ export default function MobileNav({
   // Derive active tab if prop not supplied
   const derived: NavKey | undefined =
     active ??
-    (pathname?.startsWith(`/store/${storeId}/admin`)
+    (pathname?.startsWith(`/store/${storeId}/transfers`)
+      ? "transfers"
+      : pathname?.startsWith(`/store/${storeId}/admin`)
       ? "admin"
       : pathname?.startsWith(`/store/${storeId}/qbo-export`)
       ? "qbo"
@@ -58,15 +60,16 @@ export default function MobileNav({
         md:hidden fixed inset-x-0 bottom-0 z-50
         border-t border-white/15
         bg-black/80 backdrop-blur supports-[backdrop-filter]:bg-black/60
-        pb-[env(safe-area-inset-bottom)]  /* keep bar flush, pad inside for iOS home bar */
+        pb-[env(safe-area-inset-bottom)]
       "
     >
-      <div className="max-w-3xl mx-auto grid grid-cols-5">
-        <Item k="entries"   href={`/store/${storeId}`}            label="Entries" />
-        <Item k="admin"     href={`/store/${storeId}/admin`}      label="Admin" />
-        <Item k="qbo"       href={`/store/${storeId}/qbo-export`} label="QBO" />
-        <Item k="settings"  href={`/store/${storeId}/settings`}   label="Settings" />
-        <Item k="dashboard" href={`/dashboard`}                   label="Dashboard" />
+      <div className="max-w-3xl mx-auto grid grid-cols-6">
+        <Item k="entries"    href={`/store/${storeId}`}              label="Entries" />
+        <Item k="transfers"  href={`/store/${storeId}/transfers`}    label="Transfers" />
+        <Item k="admin"      href={`/store/${storeId}/admin`}        label="Admin" />
+        <Item k="qbo"        href={`/store/${storeId}/qbo-export`}   label="QBO" />
+        <Item k="settings"   href={`/store/${storeId}/settings`}     label="Settings" />
+        <Item k="dashboard"  href={`/dashboard`}                    label="Dashboard" />
       </div>
     </nav>
   );

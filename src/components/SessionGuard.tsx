@@ -12,10 +12,11 @@ import { doc, getDoc } from 'firebase/firestore';
  * - For all other routes, waits for auth (once).
  * - If role === "manager":
  *     • Allow /store/[storeId]/entries for assigned stores
+ *     • ✅ Allow /store/[storeId]/transfers for assigned stores
  *     • Also allow global scanner routes: /scanner-demo and /scanner
  *     • Otherwise redirect to their first allowed store's Entries
  *
- * Changes in this version:
+ * Notes:
  * - onAuthStateChanged subscription is created ONCE (not re-created on every route change)
  * - Manager ACL enforcement runs on route changes using cached membership data
  * - Adds a small grace period before redirecting to /login when user becomes null
@@ -83,8 +84,6 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
         setRole(r);
         setAllowedStores(stores);
       } catch (e) {
-        // If membership read fails for any reason, don't hard-redirect here.
-        // Firestore rules still protect data; UI routing is just a convenience.
         setRole('');
         setAllowedStores([]);
         // eslint-disable-next-line no-console
@@ -125,10 +124,13 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
     // Match /store/[storeId]/[section?]
     const match = pathname.match(/^\/store\/([^/]+)(?:\/([^/?#]+))?/);
     const storeOnUrl = match?.[1] ?? '';
-    const section = match?.[2] ?? '';
+    const section = match?.[2] ?? ''; // '' means /store/{storeId}
 
-    // Only "entries" section allowed for managers
-    const sectionAllowed = section === 'entries';
+    // ✅ Managers are allowed to access these sections:
+    // - /store/{storeId} (section === '')
+    // - /store/{storeId}/entries
+    // - /store/{storeId}/transfers
+    const sectionAllowed = section === '' || section === 'entries' || section === 'transfers';
 
     // Must be one of their allowed stores
     const storeAllowed = !!storeOnUrl && allowedStores.includes(storeOnUrl);

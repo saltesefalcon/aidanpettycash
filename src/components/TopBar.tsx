@@ -31,7 +31,8 @@ export default function TopBar() {
 
   // Hide the store selector on the dashboard
   const onDashboard = pathname.startsWith('/dashboard');
-
+  const onTransfers = /\/transfers(\/|$)/.test(pathname);
+  const topTitle = onTransfers ? "Company Transfers" : "Petty Cash";
   const [stores, setStores] = React.useState<StoreItem[]>([]);
   const [currentStoreId, setCurrentStoreId] = React.useState<string | null>(null);
   const [role, setRole] = React.useState<'admin' | 'manager' | null>(null);
@@ -88,7 +89,7 @@ export default function TopBar() {
   return (
     <div className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b">
       <div className="px-4 h-12 flex items-center justify-between gap-3">
-        <div className="font-semibold">Petty Cash</div>
+        <div className="font-semibold">{topTitle}</div>
 
         {/* Admin can switch; managers just see their current store.
             The selector is hidden on the dashboard to avoid pre-store errors. */}

@@ -218,6 +218,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+        // ---------- transfers (company-wide) ----------
+    match /transfers/{id} {
+      allow read: if isAuthed();
+      allow create: if isAuthed();
+      allow update: if isAuthed();  // needed for edit/delete/flag + email status updates
+      allow delete: if false;       // we use soft-delete instead
+    }
+
+    match /transferCounters/{id} {
+      allow read, write: if isAuthed(); // used for TR-YYYYMMDD-#### counter
+    }
+
     // ---------- entries ----------
     function isValidEntry() {
       return request.resource.data.keys().hasAll(

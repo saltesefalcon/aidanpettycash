@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import IdleLogout from '@/components/IdleLogout';
-import SidebarNav from '@/components/SidebarNav'; // used for admins
+import SidebarNav from '@/components/SidebarNav'; // admins
 import TopBar from '@/components/TopBar';
 import { StoreProvider } from '@/context/StoreContext';
 
@@ -60,14 +60,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // choose a storeId for links (URL store if present, else first allowed)
   const effectiveStoreId = storeIdFromPath || allowedStores[0] || '';
 
-  // ---- Minimal manager nav (Entries only) ----
+  const isAdmin = role === 'admin';
+  const hasStore = Boolean(effectiveStoreId);
+
+  // ---- Minimal manager nav (Entries + Transfers) ----
   const ManagerSidebar = () => (
     <nav className="space-y-2">
       <Link
-        href={effectiveStoreId ? `/store/${effectiveStoreId}/entries` : '#'}
-        className="block hover:underline"
+        href={hasStore ? `/store/${effectiveStoreId}/entries` : '#'}
+        className={[
+          'block hover:underline',
+          !hasStore ? 'pointer-events-none opacity-50' : '',
+        ].join(' ')}
+        aria-disabled={!hasStore ? 'true' : 'false'}
       >
         Entries
+      </Link>
+
+      <Link
+        href={hasStore ? `/store/${effectiveStoreId}/transfers` : '#'}
+        className={[
+          'block hover:underline',
+          !hasStore ? 'pointer-events-none opacity-50' : '',
+        ].join(' ')}
+        aria-disabled={!hasStore ? 'true' : 'false'}
+      >
+        Transfers
       </Link>
     </nav>
   );
@@ -101,26 +119,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           {!loaded ? (
             <SidebarSkeleton />
-          ) : role === 'manager' ? (
+          ) : isAdmin ? (
+            // Admins keep your full SidebarNav (Dashboard/Admin/QBO/Settings)
+            <SidebarNav />
+          ) : (
+            // Managers (and any non-admin) get minimal nav
             <div className="px-4">
               <ManagerSidebar />
             </div>
-          ) : (
-            // Admins keep your full SidebarNav (Dashboard/Admin/QBO/Settings)
-            <SidebarNav />
           )}
         </aside>
       )}
 
       <div className="flex flex-col min-h-screen">
-        {/* Wrap so header can shrink/wrap instead of widening the page */}
         {!isScanner && (
           <div className="px-4 md:px-8 min-w-0">
             <TopBar />
           </div>
         )}
 
-        {/* Main content: allow children to shrink within grid cell */}
         <main className="p-4 md:p-8 flex-1 min-w-0">{children}</main>
       </div>
     </div>

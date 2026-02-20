@@ -49,7 +49,11 @@ export default function SidebarNav() {
     () => [
       { href: '/dashboard', label: 'Dashboard', needsStore: false },
       { href: storeId ? `/store/${storeId}/entries` : '#', label: 'Entries', needsStore: true },
-      { href: storeId ? `/store/${storeId}/admin`   : '#', label: 'Admin',   needsStore: true },
+
+      // ✅ ADD THIS
+      { href: storeId ? `/store/${storeId}/transfers` : '#', label: 'Transfers', needsStore: true },
+
+      { href: storeId ? `/store/${storeId}/admin` : '#', label: 'Admin', needsStore: true },
       { href: storeId ? `/store/${storeId}/qbo-export` : '#', label: 'QBO Export', needsStore: true },
       { href: 'settings', label: 'Settings', needsStore: false },
     ],
