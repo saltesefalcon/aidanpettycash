@@ -341,6 +341,8 @@ export default function EntriesPage() {
   const [jLoading, setJLoading] = useState(true);
   const [journalErr, setJournalErr] = useState<string | null>(null);
   const [showDeletedEntries, setShowDeletedEntries] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showFlagNotes, setShowFlagNotes] = useState(false);
 
   // Draft text for a note (only while editing)
   const [flagDrafts, setFlagDrafts] = useState<Record<string, string>>({});
@@ -1188,6 +1190,24 @@ export default function EntriesPage() {
               />
               Show deleted
             </label>
+            <label className="inline-flex items-center gap-2 text-sm ml-4">
+              <input
+                type="checkbox"
+                checked={showDetails}
+                onChange={(e) => setShowDetails(e.target.checked)}
+              />
+              Show details
+            </label>
+            {isAdmin && (
+              <label className="inline-flex items-center gap-2 text-sm ml-4">
+                <input
+                  type="checkbox"
+                  checked={showFlagNotes}
+                  onChange={(e) => setShowFlagNotes(e.target.checked)}
+                />
+                Show comments
+              </label>
+            )}
           </div>
 
           <div className="overflow-x-auto">
@@ -1375,14 +1395,18 @@ export default function EntriesPage() {
                       const noteIsEditing = !!flagEditing[r.id];
                       const lockedNote = (r.flagNote ?? "").trim();
                       const draftVal = flagDrafts[r.id] ?? r.flagNote ?? "";
+                      const enteredByLabel =
+                        (r.enteredBy?.name || r.enteredBy?.email || r.enteredBy?.uid || "").toString().trim();
+                      const enteredByTitle = enteredByLabel ? `Entered by: ${enteredByLabel}` : "";
 
                       return (
                         <Fragment key={r.id}>
                           <tr
+                            title={enteredByTitle}
                             className={`border-t align-top ${r.flagged ? "text-red-700" : ""} ${
                               showDeletedEntries && r.deleted ? "opacity-60 line-through" : ""
                             }`}
-                          >
+                         >
                             <td className="py-2 pr-4 whitespace-nowrap">{dStr}</td>
                             <td className="py-2 pr-4 truncate">{r.vendor}</td>
                             <td className="py-2 pr-4 truncate">{r.description}</td>
@@ -1445,8 +1469,16 @@ export default function EntriesPage() {
                               </div>
                             </td>
                           </tr>
+                          {showDetails && (
+                            <tr className="border-t bg-gray-50">
+                              <td className="py-2 px-4 text-xs text-gray-700" colSpan={11}>
+                                Entered by: {enteredByLabel || "—"}
+                                {r?.enteredBy?.email ? ` (${r.enteredBy.email})` : ""}
+                              </td>
+                            </tr>
+                          )}
 
-                          {isAdmin && r.flagged && (
+                          {isAdmin && r.flagged && showFlagNotes && (
                             <tr className="border-t bg-red-50">
                               <td className="py-3 px-4" colSpan={11}>
                                 <div className="flex flex-col gap-2">
