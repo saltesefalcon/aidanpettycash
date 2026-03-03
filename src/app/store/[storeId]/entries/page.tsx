@@ -466,7 +466,8 @@ export default function EntriesPage() {
   // Compute opening for month m as either:
   // 1) explicit override in /openingBalances/{m}, else
   // 2) previous month's closing = prevOpen + cashIns(prev, not deleted) - entries(prev, not deleted)
-  async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
+  async function computeOpeningForMonth(storeId: string, m: string, depth = 0): Promise<number> {
+    if (depth > 120) return 0; // safety stop (~10 years back)
     // 1) explicit override?
     const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
     if (openSnap.exists()) {
@@ -478,9 +479,8 @@ export default function EntriesPage() {
     const prev = new Date(yy, mm - 2, 1); // previous month
     const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
 
-    // prev open (0 if never set)
-    const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
-    const prevOpen = prevOpenSnap.exists() ? Number((prevOpenSnap.data() as any).amount ?? 0) : 0;
+    // prev open should be computed the same way (override OR derived), not defaulted to 0
+    const prevOpen = await computeOpeningForMonth(storeId, pm, depth + 1);
 
     // sum cash-ins (skip soft-deleted)
     const cinSnap = await getDocs(

@@ -1100,7 +1100,8 @@ async function saveOpening(e: React.FormEvent) {
 
   if (!storeId) return <main className="p-6">No store selected.</main>;
 
-  async function computeOpeningForMonth(storeId: string, m: string): Promise<number> {
+  async function computeOpeningForMonth(storeId: string, m: string, depth = 0): Promise<number> {
+    if (depth > 120) return 0; // safety stop (~10 years back)
     const openSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", m));
     if (openSnap.exists()) {
       return Number(((openSnap.data() as any).amount ?? 0));
@@ -1110,10 +1111,8 @@ async function saveOpening(e: React.FormEvent) {
     const prev = new Date(yy, (mm - 1) - 1, 1);
     const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
 
-    const prevOpenSnap = await getDoc(doc(db, "stores", storeId, "openingBalances", pm));
-    const prevOpen = prevOpenSnap.exists()
-      ? Number(((prevOpenSnap.data() as any).amount ?? 0))
-      : 0;
+    // prev open should be computed the same way (override OR derived), not defaulted to 0
+    const prevOpen = await computeOpeningForMonth(storeId, pm, depth + 1);
 
     const cinSnap = await getDocs(
       query(collection(db, "stores", storeId, "cashins"), where("month", "==", pm))
